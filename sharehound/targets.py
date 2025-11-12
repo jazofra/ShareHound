@@ -16,13 +16,27 @@ from sectools.windows.ldap.wrappers import (get_computers_from_domain,
 
 from sharehound.core.Config import Config
 from sharehound.core.Logger import Logger
+from sharehound.utils.utils import is_port_open
 
 
 def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
     targets = []
 
-    if options.targets_file is not None or len(options.target) != 0:
+    if (
+        options.auth_dc_ip is not None
+        and options.auth_user is not None
+        and (options.auth_password is not None or options.auth_hashes is not None)
+    ):
+        if not is_port_open(
+            options.auth_dc_ip, (389 if not options.ldaps else 636), timeout=10
+        ):
+            logger.error(
+                "Domain controller %s is not reachable on port %d"
+                % (options.auth_dc_ip, (389 if not options.ldaps else 636))
+            )
+            return []
 
+    if options.targets_file is not None or len(options.target) != 0:
         # Loading targets line by line from a targets file
         if options.targets_file is not None:
             if os.path.exists(options.targets_file):
