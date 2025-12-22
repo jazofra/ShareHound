@@ -144,20 +144,9 @@ class OpenGraphContext:
         if rights is None:
             raise Exception("Rights are None in OpenGraphContext.add_rights_to_graph()")
 
-        # existing_sids = []
         for sid, rights_edges in rights.items():
-            # Check if the sid is already in the graph
-            # And if not, add it
-            # if sid not in existing_sids:
-            #     # TODO: Needs to create nodes users and groups.
-            #     self.graph.add_node(
-            #         Node(
-            #             kinds=[kinds.node_kind_principal],
-            #             id=sid,
-            #         )
-            #     )
-            #     existing_sids.append(sid)
-
+            # Principal nodes (Users/Groups) already exist from AD collection
+            # Just create edges from SIDs to the share/file elements
             for right_edge in rights_edges:
                 self.graph.add_edge_without_validation(
                     Edge(
