@@ -163,6 +163,12 @@ def parseArgs():
         default=2.5,
         help="Timeout in seconds for network operations (default: 2.5 seconds)",
     )
+    group_advanced.add_argument(
+        "--host-timeout",
+        type=float,
+        default=None,
+        help="Maximum time in minutes to spend scanning a single host. When reached, completes current share tasks and moves on (default: no limit)",
+    )
 
     # Rules Configuration
     group_rules = parser.add_argument_group("Rules")
@@ -208,7 +214,7 @@ def parseArgs():
         "--targets-file",
         default=None,
         type=str,
-        help="Path to file containing a line by line list of targets.",
+        help="Path to file containing a line by line list of targets. If not specified and AD credentials are provided, all computers from AD will be scanned.",
     )
     group_targets_source.add_argument(
         "-tt",
@@ -216,7 +222,7 @@ def parseArgs():
         default=[],
         type=str,
         action="append",
-        help="Target IP, FQDN or CIDR.",
+        help="Target IP, FQDN or CIDR. If not specified and AD credentials are provided, all computers from AD will be scanned.",
     )
     group_targets_source.add_argument(
         "-ad",
@@ -297,7 +303,8 @@ def parseArgs():
         )
     ):
         parser.print_help()
-        print("\n[!] No targets specified.")
+        print("\n[!] No targets specified. Either provide targets with -tt/--target or -tf/--targets-file,")
+        print("    or provide AD credentials (-ai, -au, -ap/-ah) to scan all computers from Active Directory.")
         sys.exit(0)
 
     if (args.auth_password is not None) and (args.auth_hashes is not None):
@@ -347,8 +354,11 @@ def main():
     except ldap3.core.exceptions.LDAPSocketOpenError as err:
         logger.error("Failed to connect to the LDAP server: %s" % str(err))
         sys.exit(1)
-    except Exception:
-        logger.error("Failed to load targets, domain controller not reachable?")
+    except Exception as err:
+        logger.error("Failed to load targets: %s" % str(err))
+        if options.debug:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
     logger.info("Targeting %d hosts" % len(targets))
 

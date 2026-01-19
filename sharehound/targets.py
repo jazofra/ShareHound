@@ -57,45 +57,54 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
             for target in options.target:
                 targets.append(target)
     else:
-        # Loading targets from domain computers
+        # No explicit targets specified, load all computers from Active Directory
         if (
             options.auth_dc_ip is not None
             and options.auth_user is not None
             and (options.auth_password is not None or options.auth_hashes is not None)
         ):
+            logger.info(
+                "No target list specified, fetching all computers from Active Directory domain '%s'"
+                % options.auth_domain
+            )
+            
+            # Loading targets from domain computers
             logger.debug(
                 "[debug] Loading targets from computers in the domain '%s'"
                 % options.auth_domain
             )
-            targets += get_computers_from_domain(
+            computers = get_computers_from_domain(
                 auth_domain=options.auth_domain,
                 auth_dc_ip=options.auth_dc_ip,
                 auth_username=options.auth_user,
                 auth_password=options.auth_password,
                 auth_hashes=options.auth_hashes,
-                auth_key=None,
+                auth_key=options.auth_key,
+                use_kerberos=options.use_kerberos,
+                kdcHost=options.kdc_host,
                 use_ldaps=options.ldaps,
             )
+            logger.info("Found %d computers in Active Directory" % len(computers))
+            targets += computers
 
-        # Loading targets from domain servers
-        if (
-            options.auth_dc_ip is not None
-            and options.auth_user is not None
-            and (options.auth_password is not None or options.auth_hashes is not None)
-        ):
+            # Loading targets from domain servers
             logger.debug(
                 "[debug] Loading targets from servers in the domain '%s'"
                 % options.auth_domain
             )
-            targets += get_servers_from_domain(
+            servers = get_servers_from_domain(
                 auth_domain=options.auth_domain,
                 auth_dc_ip=options.auth_dc_ip,
                 auth_username=options.auth_user,
                 auth_password=options.auth_password,
                 auth_hashes=options.auth_hashes,
-                auth_key=None,
+                auth_key=options.auth_key,
+                use_kerberos=options.use_kerberos,
+                kdcHost=options.kdc_host,
                 use_ldaps=options.ldaps,
             )
+            logger.info("Found %d servers in Active Directory" % len(servers))
+            targets += servers
 
         # Loading targets from subnetworks of the domain
         if (
@@ -114,7 +123,9 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
                 auth_username=options.auth_user,
                 auth_password=options.auth_password,
                 auth_hashes=options.auth_hashes,
-                auth_key=None,
+                auth_key=options.auth_key,
+                use_kerberos=options.use_kerberos,
+                kdcHost=options.kdc_host,
                 use_ldaps=options.ldaps,
             )
 

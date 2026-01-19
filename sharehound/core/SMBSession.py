@@ -878,8 +878,86 @@ class SMBSession(object):
             except Exception:
                 pass
 
-        # Not found.
+        # Not found via registry.
         return None
+
+    def get_share_root_security_descriptor(
+        self,
+        share_name: str,
+    ) -> Optional[bytes]:
+        """
+        Get the NTFS security descriptor of the share's root folder.
+        
+        This is a fallback method when the share-level security descriptor cannot be
+        obtained (e.g., due to insufficient privileges or remote registry being disabled).
+        
+        While this returns NTFS permissions rather than share-level permissions, the root
+        folder's permissions are often the most relevant for understanding access control.
+        
+        Args:
+            share_name (str): The name of the share to get the root security descriptor for.
+            
+        Returns:
+            Optional[bytes]: The raw security descriptor bytes, or None if retrieval fails.
+        """
+        try:
+            # We need to connect to the share if not already connected
+            original_share = getattr(self, 'current_share', None)
+            original_tree_id = self.smb_tree_id
+            
+            # Connect to the target share
+            try:
+                tree_id = self.smbClient.connectTree(share_name)
+                self.smb_tree_id = tree_id
+            except Exception as e:
+                self.logger.debug(f"Could not connect to share '{share_name}' for root SD: {e}")
+                return None
+                
+            try:
+                # Open the root directory of the share
+                file_id = self.smbClient.getSMBServer().create(
+                    self.smb_tree_id,
+                    "",  # Empty path = root of the share
+                    READ_CONTROL | FILE_READ_ATTRIBUTES,
+                    0,
+                    FILE_DIRECTORY_FILE,
+                    FILE_OPEN,
+                    0,
+                )
+                
+                try:
+                    # Query the security descriptor
+                    rawNtSecurityDescriptor = self.smbClient.getSMBServer().queryInfo(
+                        self.smb_tree_id,
+                        file_id,
+                        infoType=SMB2_0_INFO_SECURITY,
+                        fileInfoClass=SMB2_SEC_INFO_00,
+                        additionalInformation=OWNER_SECURITY_INFORMATION
+                        | DACL_SECURITY_INFORMATION
+                        | GROUP_SECURITY_INFORMATION,
+                        flags=0,
+                    )
+                    
+                    return rawNtSecurityDescriptor
+                    
+                finally:
+                    # Close the file handle
+                    try:
+                        self.smbClient.getSMBServer().close(self.smb_tree_id, file_id)
+                    except Exception:
+                        pass
+                        
+            finally:
+                # Disconnect from the share and restore original state
+                try:
+                    self.smbClient.disconnectTree(tree_id)
+                except Exception:
+                    pass
+                self.smb_tree_id = original_tree_id
+                    
+        except Exception as e:
+            self.logger.debug(f"Could not get root folder security descriptor for share '{share_name}': {e}")
+            return None
 
     def list_shares(self) -> dict[str, dict]:
         """

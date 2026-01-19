@@ -14,6 +14,7 @@ node_kind_network_share_base = "NetworkShareBase"
 node_kind_network_share_host = "NetworkShareHost"
 
 edge_kind_has_network_share = "HasNetworkShare"
+edge_kind_hosts_network_share = "HostsNetworkShare"
 
 node_kind_network_share_dfs = "NetworkShareDFS"
 node_kind_network_share_smb = "NetworkShareSMB"

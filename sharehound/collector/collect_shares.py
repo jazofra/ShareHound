@@ -44,7 +44,7 @@ def collect_shares(
         tuple: (total_share_count, skipped_shares_count, total_file_count, skipped_files_count, processed_files_count, total_directory_count, skipped_directories_count, processed_directories_count) - Total counts of shares, files and directories found across all shares
     """
 
-    ogc = OpenGraphContext(graph=graph)
+    ogc = OpenGraphContext(graph=graph, logger=logger)
 
     host_remote_name = smb_session.getRemoteName()
     logger.debug(f"Collecting shares on {host_remote_name} ...")
@@ -105,8 +105,13 @@ def collect_shares(
         )
         ogc.set_share_rights(share_rights)
 
-        if rules_evaluator.can_process(rule_object_share):
+        can_process = rules_evaluator.can_process(rule_object_share)
+        logger.debug(f"[collect_shares] can_process({share_name}) = {can_process}")
+        if can_process:
             ogc.add_path_to_graph()
+            logger.debug(f"[collect_shares] Total edges created so far for share '{share_name}': {ogc.get_total_edges_created()}")
+        else:
+            logger.debug(f"[collect_shares] Skipping add_path_to_graph for share '{share_name}' because can_process returned False")
 
         # Collect contents of the share
         (
