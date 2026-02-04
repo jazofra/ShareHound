@@ -1,0 +1,301 @@
+// ShareHound - A tool to map network share access rights into BloodHound OpenGraph format.
+package main
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"sync"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/specterops/sharehound/internal/collector"
+	"github.com/specterops/sharehound/internal/config"
+	"github.com/specterops/sharehound/internal/credentials"
+	"github.com/specterops/sharehound/internal/graph"
+	"github.com/specterops/sharehound/internal/logger"
+	"github.com/specterops/sharehound/internal/rules"
+	"github.com/specterops/sharehound/internal/status"
+	"github.com/specterops/sharehound/internal/targets"
+	"github.com/specterops/sharehound/internal/utils"
+	"github.com/specterops/sharehound/internal/worker"
+	"github.com/specterops/sharehound/pkg/kinds"
+)
+
+// Version information
+const Version = "1.0.0"
+
+// CLI flags
+var (
+	// Output options
+	verbose  bool
+	debug    bool
+	noColors bool
+	logfile  string
+	output   string
+
+	// Advanced configuration
+	advertisedName    string
+	threads           int
+	maxWorkersPerHost int
+	globalMaxWorkers  int
+	nameserver        string
+	timeout           float64
+	hostTimeout       float64
+
+	// Rules
+	rulesFiles  []string
+	ruleStrings []string
+
+	// Share exploration
+	shareName           string
+	depth               int
+	includeCommonShares bool
+
+	// Targets and authentication
+	targetsFile  string
+	targetsList  []string
+	authDomain   string
+	authDCIP     string
+	authUser     string
+	authPassword string
+	authHashes   string
+	authKey      string
+	useKerberos  bool
+	kdcHost      string
+	useLDAPS     bool
+	subnets      bool
+)
+
+func main() {
+	rootCmd := &cobra.Command{
+		Use:   "sharehound",
+		Short: "ShareHound - Map network share access rights to BloodHound OpenGraph",
+		Long: `ShareHound is a tool that enumerates SMB shares and their permissions,
+creating a BloodHound-compatible OpenGraph for security analysis.`,
+		Run:     run,
+		Version: Version,
+	}
+
+	// Output options
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose mode")
+	rootCmd.Flags().BoolVar(&debug, "debug", false, "Debug mode")
+	rootCmd.Flags().BoolVar(&noColors, "no-colors", false, "Disable ANSI escape codes")
+	rootCmd.Flags().StringVar(&logfile, "logfile", "", "Log file to write to")
+	rootCmd.Flags().StringVarP(&output, "output", "o", "opengraph.json", "Output file to write to")
+
+	// Advanced configuration
+	rootCmd.Flags().StringVar(&advertisedName, "advertised-name", "", "Advertised name of the client")
+	rootCmd.Flags().IntVar(&threads, "threads", runtime.NumCPU()*8, "Number of threads to use")
+	rootCmd.Flags().IntVar(&maxWorkersPerHost, "max-workers-per-host", 8, "Maximum concurrent shares per host")
+	rootCmd.Flags().IntVar(&globalMaxWorkers, "global-max-workers", 200, "Global maximum workers")
+	rootCmd.Flags().StringVarP(&nameserver, "nameserver", "n", "", "Nameserver for DNS queries")
+	rootCmd.Flags().Float64VarP(&timeout, "timeout", "t", 2.5, "Timeout in seconds for network operations")
+	rootCmd.Flags().Float64Var(&hostTimeout, "host-timeout", 0, "Maximum time in minutes per host (0 = no limit)")
+
+	// Rules
+	rootCmd.Flags().StringArrayVarP(&rulesFiles, "rules-file", "r", nil, "Path to file containing rules")
+	rootCmd.Flags().StringArrayVar(&ruleStrings, "rule-string", nil, "Rule string (can be specified multiple times)")
+
+	// Share exploration
+	rootCmd.Flags().StringVar(&shareName, "share", "", "Share to enumerate (default: all shares)")
+	rootCmd.Flags().IntVar(&depth, "depth", 3, "Maximum depth to traverse directories")
+	rootCmd.Flags().BoolVar(&includeCommonShares, "include-common-shares", false, "Include C$, ADMIN$, IPC$, PRINT$")
+
+	// Targets and authentication
+	rootCmd.Flags().StringVarP(&targetsFile, "targets-file", "f", "", "Path to file containing targets")
+	rootCmd.Flags().StringArrayVar(&targetsList, "target", nil, "Target IP, FQDN or CIDR")
+	rootCmd.Flags().StringVar(&authDomain, "auth-domain", "", "Windows domain to authenticate to")
+	rootCmd.Flags().StringVar(&authDCIP, "auth-dc-ip", "", "IP of the domain controller")
+	rootCmd.Flags().StringVar(&authUser, "auth-user", "", "Username of the domain account")
+	rootCmd.Flags().StringVar(&authPassword, "auth-password", "", "Password of the domain account")
+	rootCmd.Flags().StringVar(&authHashes, "auth-hashes", "", "LM:NT hashes for pass-the-hash")
+	rootCmd.Flags().StringVar(&authKey, "auth-key", "", "Kerberos key for authentication")
+	rootCmd.Flags().BoolVarP(&useKerberos, "use-kerberos", "k", false, "Use Kerberos authentication")
+	rootCmd.Flags().StringVar(&kdcHost, "kdc-host", "", "KDC host for Kerberos authentication")
+	rootCmd.Flags().BoolVar(&useLDAPS, "ldaps", false, "Use LDAPS instead of LDAP")
+	rootCmd.Flags().BoolVar(&subnets, "subnets", false, "Auto-enumerate all domain subnets")
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(cmd *cobra.Command, args []string) {
+	fmt.Printf("ShareHound v%s - by Remi Gascou (@podalirius_) @ SpecterOps\n\n", Version)
+
+	// Validate arguments
+	if targetsFile == "" && len(targetsList) == 0 && authUser == "" {
+		fmt.Println("[!] No targets specified. Either provide targets with --target or --targets-file,")
+		fmt.Println("    or provide AD credentials (--auth-dc-ip, --auth-user, --auth-password)")
+		os.Exit(1)
+	}
+
+	if authPassword != "" && authHashes != "" {
+		fmt.Println("[!] Options --auth-password and --auth-hashes are mutually exclusive.")
+		os.Exit(1)
+	}
+
+	if authDCIP == "" && authUser != "" && (authPassword != "" || authHashes != "") {
+		fmt.Println("[!] Option --auth-dc-ip is required when using authentication options.")
+		os.Exit(1)
+	}
+
+	// Create configuration
+	cfg := config.NewConfig(debug, &noColors)
+
+	// Create logger
+	log := logger.NewLogger(cfg, logfile)
+	defer log.Close()
+
+	// Parse rules
+	var parsedRules []rules.Rule
+	parser := rules.NewParser()
+
+	if len(rulesFiles) == 0 && len(ruleStrings) == 0 {
+		// Use default rules
+		ruleStrings = rules.DefaultRules
+	}
+
+	if len(rulesFiles) > 0 {
+		for _, file := range rulesFiles {
+			content, err := os.ReadFile(file)
+			if err != nil {
+				log.Error(fmt.Sprintf("Error reading rules file %s: %v", file, err))
+				os.Exit(1)
+			}
+			fileRules, errors := parser.Parse(string(content))
+			if len(errors) > 0 {
+				log.Error(fmt.Sprintf("Errors parsing rules file %s:", file))
+				for _, e := range errors {
+					log.Error(e.Error())
+				}
+				os.Exit(1)
+			}
+			parsedRules = append(parsedRules, fileRules...)
+		}
+	} else if len(ruleStrings) > 0 {
+		rules, errors := parser.ParseStrings(ruleStrings)
+		if len(errors) > 0 {
+			log.Error("Errors parsing rules:")
+			for _, e := range errors {
+				log.Error(e.Error())
+			}
+			os.Exit(1)
+		}
+		parsedRules = rules
+	}
+
+	log.Debug(fmt.Sprintf("%d rules parsed successfully", len(parsedRules)))
+
+	log.Info("Starting ShareHound")
+	startTime := time.Now()
+
+	// Create OpenGraph
+	og := graph.NewOpenGraph(kinds.NodeKindNetworkShareBase)
+
+	// Load targets
+	targetOpts := &targets.Options{
+		TargetsFile:  targetsFile,
+		Targets:      targetsList,
+		AuthDomain:   authDomain,
+		AuthDCIP:     authDCIP,
+		AuthUser:     authUser,
+		AuthPassword: authPassword,
+		AuthHashes:   authHashes,
+		AuthKey:      authKey,
+		UseKerberos:  useKerberos,
+		KDCHost:      kdcHost,
+		UseLDAPS:     useLDAPS,
+		Subnets:      subnets,
+		Timeout:      time.Duration(timeout * float64(time.Second)),
+	}
+
+	loadedTargets, err := targets.LoadTargets(targetOpts, cfg, log)
+	if err != nil {
+		log.Error(fmt.Sprintf("Failed to load targets: %v", err))
+		os.Exit(1)
+	}
+
+	log.Info(fmt.Sprintf("Targeting %d hosts", len(loadedTargets)))
+
+	if len(loadedTargets) == 0 {
+		log.Warning("No targets to scan")
+		os.Exit(0)
+	}
+
+	// Create credentials
+	creds := credentials.NewCredentials(
+		authDomain,
+		authUser,
+		authPassword,
+		&authHashes,
+		useKerberos,
+		&authKey,
+		&kdcHost,
+	)
+
+	// Create worker options
+	workerOpts := &worker.Options{
+		Creds:             creds,
+		Timeout:           time.Duration(timeout * float64(time.Second)),
+		HostTimeout:       time.Duration(hostTimeout * float64(time.Minute)),
+		AdvertisedName:    advertisedName,
+		MaxWorkersPerHost: maxWorkersPerHost,
+		GlobalMaxWorkers:  globalMaxWorkers,
+		Depth:             depth,
+		Nameserver:        nameserver,
+		Logfile:           logfile,
+	}
+
+	// Create results tracker
+	results := &collector.WorkerResults{}
+	var resultsLock sync.Mutex
+
+	// Start progress tracker
+	tracker := status.NewProgressTracker(results, &resultsLock, len(loadedTargets))
+	tracker.Start()
+
+	// Process targets concurrently
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, threads)
+
+	for _, target := range loadedTargets {
+		wg.Add(1)
+		semaphore <- struct{}{}
+
+		go func(t targets.Target) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			worker.ProcessTarget(t, workerOpts, cfg, og, parsedRules, results, &resultsLock)
+		}(target)
+	}
+
+	wg.Wait()
+	tracker.Stop()
+
+	// Export graph
+	log.Info(fmt.Sprintf("Exporting graph to \"%s\"", output))
+	log.IncrementIndent()
+	log.Info(fmt.Sprintf("Nodes: %d", og.GetNodeCount()))
+	log.Info(fmt.Sprintf("Edges: %d", og.GetEdgeCount()))
+
+	if err := og.ExportToFile(output, false); err != nil {
+		log.Error(fmt.Sprintf("Failed to export graph: %v", err))
+		os.Exit(1)
+	}
+
+	// Get file size
+	info, _ := os.Stat(output)
+	log.Info(fmt.Sprintf("Graph successfully exported to \"%s\" (%s)", output, utils.FormatFileSize(info.Size())))
+	log.DecrementIndent()
+
+	// Print final summary
+	status.PrintFinalSummary(results, &resultsLock)
+
+	elapsed := time.Since(startTime)
+	log.Info(fmt.Sprintf("ShareHound completed, time elapsed: %s", utils.DeltaTime(elapsed)))
+}
