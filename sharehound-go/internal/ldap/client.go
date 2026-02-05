@@ -9,6 +9,9 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+// Default page size for LDAP paging (AD default MaxPageSize is 1000)
+const defaultPageSize = 1000
+
 // Client represents an LDAP client for Active Directory.
 type Client struct {
 	conn     *ldap.Conn
@@ -98,7 +101,7 @@ func (c *Client) Close() {
 	}
 }
 
-// GetComputers retrieves all computer objects from AD.
+// GetComputers retrieves all computer objects from AD using paging.
 func (c *Client) GetComputers() ([]string, error) {
 	searchRequest := ldap.NewSearchRequest(
 		c.baseDN,
@@ -108,7 +111,8 @@ func (c *Client) GetComputers() ([]string, error) {
 		nil,
 	)
 
-	sr, err := c.conn.Search(searchRequest)
+	// Use paging to handle large result sets
+	sr, err := c.conn.SearchWithPaging(searchRequest, defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("LDAP search failed: %w", err)
 	}
@@ -130,7 +134,7 @@ func (c *Client) GetComputers() ([]string, error) {
 	return computers, nil
 }
 
-// GetServers retrieves server objects from AD (computers with "server" in OS).
+// GetServers retrieves server objects from AD (computers with "server" in OS) using paging.
 func (c *Client) GetServers() ([]string, error) {
 	searchRequest := ldap.NewSearchRequest(
 		c.baseDN,
@@ -140,7 +144,8 @@ func (c *Client) GetServers() ([]string, error) {
 		nil,
 	)
 
-	sr, err := c.conn.Search(searchRequest)
+	// Use paging to handle large result sets
+	sr, err := c.conn.SearchWithPaging(searchRequest, defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("LDAP search failed: %w", err)
 	}
@@ -174,7 +179,8 @@ func (c *Client) GetSubnets() ([]string, error) {
 		nil,
 	)
 
-	sr, err := c.conn.Search(searchRequest)
+	// Use paging for consistency, though subnets are usually fewer
+	sr, err := c.conn.SearchWithPaging(searchRequest, defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("LDAP search for subnets failed: %w", err)
 	}
