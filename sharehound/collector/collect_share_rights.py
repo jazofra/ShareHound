@@ -120,21 +120,31 @@ def collect_share_rights(
     used_fallback = False
 
     try:
-        logger.debug(f"[collect_share_rights] Retrieving security descriptor for share: {share_name}")
+        logger.debug(
+            f"[collect_share_rights] Retrieving security descriptor for share: {share_name}"
+        )
         sd = smb_session.get_share_security_descriptor(share_name)
 
         if sd is None or len(sd) == 0:
             # Try fallback: get the root folder's security descriptor
-            logger.debug(f"[collect_share_rights] Share-level security descriptor unavailable for '{share_name}', trying root folder fallback...")
+            logger.debug(
+                f"[collect_share_rights] Share-level security descriptor unavailable for '{share_name}', trying root folder fallback..."
+            )
             sd = smb_session.get_share_root_security_descriptor(share_name)
             if sd is not None and len(sd) > 0:
                 used_fallback = True
-                logger.debug(f"[collect_share_rights] Using root folder NTFS permissions as fallback for share: {share_name}")
+                logger.debug(
+                    f"[collect_share_rights] Using root folder NTFS permissions as fallback for share: {share_name}"
+                )
             else:
-                logger.warning(f"[collect_share_rights] Could not retrieve security descriptor for share: {share_name} (both share-level and root folder fallback failed). No share rights edges will be created. This may be due to insufficient privileges or the remote registry service being disabled.")
+                logger.warning(
+                    f"[collect_share_rights] Could not retrieve security descriptor for share: {share_name} (both share-level and root folder fallback failed). No share rights edges will be created. This may be due to insufficient privileges or the remote registry service being disabled."
+                )
                 return share_rights
 
-        logger.debug(f"[collect_share_rights] Security descriptor retrieved ({len(sd)} bytes) for share: {share_name}{' (via root folder fallback)' if used_fallback else ''}")
+        logger.debug(
+            f"[collect_share_rights] Security descriptor retrieved ({len(sd)} bytes) for share: {share_name}{' (via root folder fallback)' if used_fallback else ''}"
+        )
 
         # Parse the security descriptor
         security_descriptor = ldaptypes.SR_SECURITY_DESCRIPTOR()
@@ -147,20 +157,28 @@ def collect_share_rights(
 
         dacl_data = security_descriptor["Dacl"]["Data"]
         if dacl_data is None or len(dacl_data) == 0:
-            logger.debug(f"[collect_share_rights] DACL is empty (no ACEs) for share: {share_name}")
+            logger.debug(
+                f"[collect_share_rights] DACL is empty (no ACEs) for share: {share_name}"
+            )
             return share_rights
 
-        logger.debug(f"[collect_share_rights] DACL contains {len(dacl_data)} ACE(s) for share: {share_name}")
+        logger.debug(
+            f"[collect_share_rights] DACL contains {len(dacl_data)} ACE(s) for share: {share_name}"
+        )
 
         # Process each ACE in the DACL
         for ace_index, ace in enumerate(dacl_data):
             # Check if ACE has a valid SID
             if "Ace" not in ace.fields or "Sid" not in ace["Ace"].fields:
-                logger.debug(f"[collect_share_rights] ACE #{ace_index}: Invalid ACE structure, skipping")
+                logger.debug(
+                    f"[collect_share_rights] ACE #{ace_index}: Invalid ACE structure, skipping"
+                )
                 continue
 
             if len(ace["Ace"]["Sid"]) == 0:
-                logger.debug(f"[collect_share_rights] ACE #{ace_index}: Empty SID, skipping")
+                logger.debug(
+                    f"[collect_share_rights] ACE #{ace_index}: Empty SID, skipping"
+                )
                 continue
 
             aceType = ace["AceType"]
@@ -170,26 +188,38 @@ def collect_share_rights(
             sid = aceSid.formatCanonical()
 
             # Log ACE type
-            ace_type_name = "ACCESS_ALLOWED" if aceType == ACCESS_ALLOWED_ACE_TYPE else \
-                           "ACCESS_DENIED" if aceType == ACCESS_DENIED_ACE_TYPE else \
-                           f"UNKNOWN({aceType})"
-            logger.debug(f"[collect_share_rights] ACE #{ace_index}: Type={ace_type_name}, SID={sid}, Mask=0x{maskValue:08X}")
+            ace_type_name = (
+                "ACCESS_ALLOWED"
+                if aceType == ACCESS_ALLOWED_ACE_TYPE
+                else (
+                    "ACCESS_DENIED"
+                    if aceType == ACCESS_DENIED_ACE_TYPE
+                    else f"UNKNOWN({aceType})"
+                )
+            )
+            logger.debug(
+                f"[collect_share_rights] ACE #{ace_index}: Type={ace_type_name}, SID={sid}, Mask=0x{maskValue:08X}"
+            )
 
             # Only process ACCESS_ALLOWED ACEs
             if aceType != ACCESS_ALLOWED_ACE_TYPE:
-                logger.debug(f"[collect_share_rights] ACE #{ace_index}: Skipping non-ACCESS_ALLOWED ACE (type={aceType})")
+                logger.debug(
+                    f"[collect_share_rights] ACE #{ace_index}: Skipping non-ACCESS_ALLOWED ACE (type={aceType})"
+                )
                 continue
 
             # Check for specific rights and create edges
-            access_flags = [
-                flag for flag in AccessMaskFlags if flag.value & maskValue
-            ]
+            access_flags = [flag for flag in AccessMaskFlags if flag.value & maskValue]
 
             if len(access_flags) == 0:
-                logger.debug(f"[collect_share_rights] ACE #{ace_index}: No matching access flags for mask 0x{maskValue:08X}")
+                logger.debug(
+                    f"[collect_share_rights] ACE #{ace_index}: No matching access flags for mask 0x{maskValue:08X}"
+                )
                 continue
 
-            logger.debug(f"[collect_share_rights] ACE #{ace_index}: Matched flags: {[flag.name for flag in access_flags]}")
+            logger.debug(
+                f"[collect_share_rights] ACE #{ace_index}: Matched flags: {[flag.name for flag in access_flags]}"
+            )
 
             # Map access flags to edge kinds
             edges_added = []
@@ -201,14 +231,20 @@ def collect_share_rights(
                     edges_added.append(edgeName)
 
             if edges_added:
-                logger.debug(f"[collect_share_rights] ACE #{ace_index}: Created {len(edges_added)} edge(s) for SID {sid}: {edges_added}")
+                logger.debug(
+                    f"[collect_share_rights] ACE #{ace_index}: Created {len(edges_added)} edge(s) for SID {sid}: {edges_added}"
+                )
 
         # Summary
         total_edges = sum(len(edges) for edges in share_rights.values())
-        logger.debug(f"[collect_share_rights] Summary for share '{share_name}': {len(share_rights)} SID(s), {total_edges} total edge(s)")
+        logger.debug(
+            f"[collect_share_rights] Summary for share '{share_name}': {len(share_rights)} SID(s), {total_edges} total edge(s)"
+        )
 
     except Exception as err:
-        logger.debug(f"[collect_share_rights] Error processing share rights for {share_name}: {err}")
+        logger.debug(
+            f"[collect_share_rights] Error processing share rights for {share_name}: {err}"
+        )
         raise err
 
     return share_rights

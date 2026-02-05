@@ -6,7 +6,7 @@
 
 import ntpath
 import os
-from threading import Lock, Event
+from threading import Event, Lock
 from typing import Optional
 
 from bhopengraph.Node import Node

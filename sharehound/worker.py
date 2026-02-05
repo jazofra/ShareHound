@@ -9,8 +9,8 @@ import random
 import time
 import traceback
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from threading import Lock, Semaphore, Event
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from threading import Event, Lock, Semaphore
 from typing import Dict, Optional, Tuple
 
 from bhopengraph.Node import Node
@@ -235,23 +235,31 @@ def process_share_task(
                 from sharehound.collector.collect_share_rights import \
                     collect_share_rights
 
-                task_logger.debug(f"[worker] Calling collect_share_rights for share: {share_name}")
+                task_logger.debug(
+                    f"[worker] Calling collect_share_rights for share: {share_name}"
+                )
                 share_rights = collect_share_rights(
                     smb_session=smb_session,
                     share_name=share_name,
                     rules_evaluator=rules_evaluator,
                     logger=task_logger,
                 )
-                task_logger.debug(f"[worker] collect_share_rights returned: {len(share_rights)} SIDs")
+                task_logger.debug(
+                    f"[worker] collect_share_rights returned: {len(share_rights)} SIDs"
+                )
                 ogc.set_share_rights(share_rights)
 
                 can_process = rules_evaluator.can_process(rule_object_share)
                 task_logger.debug(f"[worker] can_process({share_name}) = {can_process}")
                 if can_process:
                     ogc.add_path_to_graph()
-                    task_logger.debug(f"[worker] Total edges created so far for share '{share_name}': {ogc.get_total_edges_created()}")
+                    task_logger.debug(
+                        f"[worker] Total edges created so far for share '{share_name}': {ogc.get_total_edges_created()}"
+                    )
                 else:
-                    task_logger.debug(f"[worker] Skipping add_path_to_graph for share '{share_name}' because can_process returned False")
+                    task_logger.debug(
+                        f"[worker] Skipping add_path_to_graph for share '{share_name}' because can_process returned False"
+                    )
 
                 # Collect contents of the share
                 from sharehound.collector.collect_contents_in_share import \
@@ -416,11 +424,13 @@ def multithreaded_share_worker(
 
             # Create timeout event for this host
             timeout_event = Event()
-            
+
             # Calculate host timeout in seconds (option is in minutes)
             host_timeout_seconds = None
-            if hasattr(options, 'host_timeout') and options.host_timeout is not None:
-                host_timeout_seconds = options.host_timeout * 60  # Convert minutes to seconds
+            if hasattr(options, "host_timeout") and options.host_timeout is not None:
+                host_timeout_seconds = (
+                    options.host_timeout * 60
+                )  # Convert minutes to seconds
 
             # Create tasks for each share
             share_tasks = []
@@ -461,7 +471,9 @@ def multithreaded_share_worker(
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
-                    executor.submit(process_share_task, *task): task[0]  # Map future to share_name
+                    executor.submit(process_share_task, *task): task[
+                        0
+                    ]  # Map future to share_name
                     for task in share_tasks
                 }
                 pending_futures = set(futures.keys())
@@ -477,7 +489,7 @@ def multithreaded_share_worker(
                             # Timeout reached - cancel pending futures and signal tasks
                             host_timed_out = True
                             timeout_event.set()
-                            
+
                             # Cancel futures that haven't started yet
                             cancelled_count = 0
                             for future in list(pending_futures):
@@ -485,7 +497,7 @@ def multithreaded_share_worker(
                                     cancelled_count += 1
                                     pending_futures.discard(future)
                                     timeout_skipped_count += 1
-                            
+
                             logger.info(
                                 f"  │ Host timeout reached for {target_ip} after {delta_time(elapsed)}, "
                                 f"cancelled {cancelled_count} pending shares, waiting for running tasks..."
@@ -494,7 +506,11 @@ def multithreaded_share_worker(
                             wait_timeout = min(wait_timeout, remaining)
 
                     # Wait for some futures to complete (with timeout)
-                    done, pending_futures = wait(pending_futures, timeout=wait_timeout, return_when=FIRST_COMPLETED)
+                    done, pending_futures = wait(
+                        pending_futures,
+                        timeout=wait_timeout,
+                        return_when=FIRST_COMPLETED,
+                    )
 
                     # Process completed futures
                     for future in done:
@@ -524,20 +540,18 @@ def multithreaded_share_worker(
                             processed_directories_count += processed_dirs
 
                         except Exception as e:
-                            logger.debug(f"Error processing share {futures.get(future, 'unknown')}: {str(e)}")
+                            logger.debug(
+                                f"Error processing share {futures.get(future, 'unknown')}: {str(e)}"
+                            )
                             skipped_shares_count += 1
 
             # Update global worker_results with aggregated counts
             total_skipped = skipped_shares_count + timeout_skipped_count
             with results_lock:
-                worker_results["shares_total"] += (
-                    total_share_count + total_skipped
-                )
+                worker_results["shares_total"] += total_share_count + total_skipped
                 worker_results["shares_processed"] += total_share_count
                 worker_results["shares_skipped"] += total_skipped
-                worker_results["shares_pending"] -= (
-                    total_share_count + total_skipped
-                )
+                worker_results["shares_pending"] -= total_share_count + total_skipped
                 worker_results["files_total"] += total_file_count + skipped_files_count
                 worker_results["files_processed"] += processed_files_count
                 worker_results["files_skipped"] += skipped_files_count
@@ -549,12 +563,12 @@ def multithreaded_share_worker(
 
             timestamp_stop = time.time()
             elapsed_time = delta_time(timestamp_stop - timestamp_start)
-            
+
             # Build log message with timeout info if applicable
             timeout_info = ""
             if host_timed_out:
                 timeout_info = f" [TIMEOUT: {timeout_skipped_count} shares skipped]"
-            
+
             logger.info(
                 f"  │ Target {target_ip} completed: {total_share_count} shares (skipped {skipped_shares_count}), "
                 f"{total_file_count} files (processed {processed_files_count}, skipped {skipped_files_count}), "

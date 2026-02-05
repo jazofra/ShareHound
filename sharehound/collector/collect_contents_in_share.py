@@ -4,7 +4,7 @@
 # Author             : Remi Gascou (@podalirius_)
 # Date created       : 12 Aug 2025
 
-from threading import Lock, Event
+from threading import Event, Lock
 from typing import Optional
 
 from shareql.evaluate.evaluator import RulesEvaluator

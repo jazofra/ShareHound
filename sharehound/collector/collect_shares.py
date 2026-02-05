@@ -109,9 +109,13 @@ def collect_shares(
         logger.debug(f"[collect_shares] can_process({share_name}) = {can_process}")
         if can_process:
             ogc.add_path_to_graph()
-            logger.debug(f"[collect_shares] Total edges created so far for share '{share_name}': {ogc.get_total_edges_created()}")
+            logger.debug(
+                f"[collect_shares] Total edges created so far for share '{share_name}': {ogc.get_total_edges_created()}"
+            )
         else:
-            logger.debug(f"[collect_shares] Skipping add_path_to_graph for share '{share_name}' because can_process returned False")
+            logger.debug(
+                f"[collect_shares] Skipping add_path_to_graph for share '{share_name}' because can_process returned False"
+            )
 
         # Collect contents of the share
         (

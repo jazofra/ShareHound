@@ -67,7 +67,7 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
                 "No target list specified, fetching all computers from Active Directory domain '%s'"
                 % options.auth_domain
             )
-            
+
             # Loading targets from domain computers
             logger.debug(
                 "[debug] Loading targets from computers in the domain '%s'"
