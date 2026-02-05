@@ -3,12 +3,14 @@ package targets
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/specterops/sharehound/internal/config"
+	"github.com/specterops/sharehound/internal/ldap"
 	"github.com/specterops/sharehound/internal/logger"
 	"github.com/specterops/sharehound/internal/utils"
 )
@@ -48,7 +50,7 @@ func LoadTargets(opts *Options, cfg *config.Config, log logger.LoggerInterface) 
 		}
 		ok, _ := utils.IsPortOpen(opts.AuthDCIP, port, 10*time.Second)
 		if !ok {
-			log.Error("Domain controller " + opts.AuthDCIP + " is not reachable")
+			log.Error(fmt.Sprintf("Domain controller %s is not reachable on port %d", opts.AuthDCIP, port))
 			return nil, nil
 		}
 	}
@@ -71,17 +73,26 @@ func LoadTargets(opts *Options, cfg *config.Config, log logger.LoggerInterface) 
 	}
 
 	// Load from AD if no explicit targets
-	if len(rawTargets) == 0 && opts.AuthDCIP != "" && opts.AuthUser != "" {
-		log.Info("No target list specified, would fetch from Active Directory (not implemented)")
-		// TODO: Implement LDAP queries for computers and servers
-		// computers := getComputersFromDomain(opts)
-		// servers := getServersFromDomain(opts)
+	if len(rawTargets) == 0 && opts.AuthDCIP != "" && opts.AuthUser != "" && (opts.AuthPassword != "" || opts.AuthHashes != "") {
+		log.Info(fmt.Sprintf("No target list specified, fetching all computers from Active Directory domain '%s'", opts.AuthDomain))
+
+		adTargets, err := loadFromActiveDirectory(opts, log)
+		if err != nil {
+			log.Error("Error loading targets from Active Directory: " + err.Error())
+		} else {
+			rawTargets = append(rawTargets, adTargets...)
+		}
 	}
 
 	// Load subnets if requested
-	if opts.Subnets && opts.AuthDCIP != "" {
-		log.Debug("Loading subnets from domain (not implemented)")
-		// TODO: Implement subnet enumeration
+	if opts.Subnets && opts.AuthDCIP != "" && opts.AuthUser != "" && (opts.AuthPassword != "" || opts.AuthHashes != "") {
+		log.Debug(fmt.Sprintf("Loading subnets from domain '%s'", opts.AuthDomain))
+		subnets, err := loadSubnetsFromAD(opts, log)
+		if err != nil {
+			log.Warning("Error loading subnets from AD: " + err.Error())
+		} else {
+			rawTargets = append(rawTargets, subnets...)
+		}
 	}
 
 	// Deduplicate and sort
@@ -120,6 +131,82 @@ func LoadTargets(opts *Options, cfg *config.Config, log logger.LoggerInterface) 
 	finalTargets = uniqueTargets(finalTargets)
 
 	return finalTargets, nil
+}
+
+// loadFromActiveDirectory loads computers and servers from AD.
+func loadFromActiveDirectory(opts *Options, log logger.LoggerInterface) ([]string, error) {
+	ldapOpts := &ldap.ClientOptions{
+		Domain:   opts.AuthDomain,
+		DCIP:     opts.AuthDCIP,
+		Username: opts.AuthUser,
+		Password: opts.AuthPassword,
+		Hashes:   opts.AuthHashes,
+		UseLDAPS: opts.UseLDAPS,
+	}
+
+	client, err := ldap.NewClient(ldapOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LDAP client: %w", err)
+	}
+
+	if err := client.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
+	}
+	defer client.Close()
+
+	var targets []string
+
+	// Get computers
+	log.Debug("Loading targets from computers in the domain")
+	computers, err := client.GetComputers()
+	if err != nil {
+		log.Warning("Error fetching computers: " + err.Error())
+	} else {
+		log.Info(fmt.Sprintf("Found %d computers in Active Directory", len(computers)))
+		targets = append(targets, computers...)
+	}
+
+	// Get servers
+	log.Debug("Loading targets from servers in the domain")
+	servers, err := client.GetServers()
+	if err != nil {
+		log.Warning("Error fetching servers: " + err.Error())
+	} else {
+		log.Info(fmt.Sprintf("Found %d servers in Active Directory", len(servers)))
+		targets = append(targets, servers...)
+	}
+
+	return targets, nil
+}
+
+// loadSubnetsFromAD loads subnet CIDRs from AD Sites and Services.
+func loadSubnetsFromAD(opts *Options, log logger.LoggerInterface) ([]string, error) {
+	ldapOpts := &ldap.ClientOptions{
+		Domain:   opts.AuthDomain,
+		DCIP:     opts.AuthDCIP,
+		Username: opts.AuthUser,
+		Password: opts.AuthPassword,
+		Hashes:   opts.AuthHashes,
+		UseLDAPS: opts.UseLDAPS,
+	}
+
+	client, err := ldap.NewClient(ldapOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LDAP client: %w", err)
+	}
+
+	if err := client.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
+	}
+	defer client.Close()
+
+	subnets, err := client.GetSubnets()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subnets: %w", err)
+	}
+
+	log.Info(fmt.Sprintf("Found %d subnets in Active Directory", len(subnets)))
+	return subnets, nil
 }
 
 // loadFromFile loads targets from a file, one per line.
