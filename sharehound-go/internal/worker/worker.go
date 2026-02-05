@@ -2,6 +2,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -158,7 +159,7 @@ func ProcessTarget(
 			defer wg.Done()
 
 			// Acquire semaphore
-			if err := hostSem.Acquire(nil, 1); err != nil {
+			if err := hostSem.Acquire(context.Background(), 1); err != nil {
 				return
 			}
 			defer hostSem.Release(1)
