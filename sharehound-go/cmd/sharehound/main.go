@@ -4,12 +4,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/specterops/sharehound/internal/checkpoint"
 	"github.com/specterops/sharehound/internal/collector"
 	"github.com/specterops/sharehound/internal/config"
 	"github.com/specterops/sharehound/internal/credentials"
@@ -66,6 +69,11 @@ var (
 	kdcHost      string
 	useLDAPS     bool
 	subnets      bool
+
+	// Checkpoint/resume options
+	checkpointFile     string
+	checkpointInterval float64
+	resume             bool
 )
 
 func main() {
@@ -116,6 +124,11 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 	rootCmd.Flags().StringVar(&kdcHost, "kdc-host", "", "KDC host for Kerberos authentication")
 	rootCmd.Flags().BoolVar(&useLDAPS, "ldaps", false, "Use LDAPS instead of LDAP")
 	rootCmd.Flags().BoolVar(&subnets, "subnets", false, "Auto-enumerate all domain subnets")
+
+	// Checkpoint/resume options
+	rootCmd.Flags().StringVar(&checkpointFile, "checkpoint", "", "Checkpoint file for resumable scans")
+	rootCmd.Flags().Float64Var(&checkpointInterval, "checkpoint-interval", 60, "Checkpoint save interval in seconds")
+	rootCmd.Flags().BoolVar(&resume, "resume", false, "Resume from existing checkpoint file")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -196,6 +209,28 @@ func run(cmd *cobra.Command, args []string) {
 	// Create OpenGraph
 	og := graph.NewOpenGraph(kinds.NodeKindNetworkShareBase)
 
+	// Create checkpoint manager
+	cpInterval := time.Duration(checkpointInterval * float64(time.Second))
+	cpManager := checkpoint.NewManager(checkpointFile, cpInterval)
+
+	// Handle resume
+	if resume && checkpointFile != "" {
+		if checkpoint.Exists(checkpointFile) {
+			log.Info(fmt.Sprintf("Resuming from checkpoint: %s", checkpointFile))
+			cp, err := checkpoint.Load(checkpointFile)
+			if err != nil {
+				log.Error(fmt.Sprintf("Failed to load checkpoint: %v", err))
+				os.Exit(1)
+			}
+			cpManager.RestoreFrom(cp)
+			og.RestoreNodesAndEdges(cp.GraphNodes, cp.GraphEdges)
+			log.Info(fmt.Sprintf("Restored %d processed targets, %d nodes, %d edges",
+				len(cp.ProcessedTargets), len(cp.GraphNodes), len(cp.GraphEdges)))
+		} else {
+			log.Warning("Checkpoint file not found, starting fresh scan")
+		}
+	}
+
 	// Load targets
 	targetOpts := &targets.Options{
 		TargetsFile:  targetsFile,
@@ -254,15 +289,68 @@ func run(cmd *cobra.Command, args []string) {
 	results := &collector.WorkerResults{}
 	var resultsLock sync.Mutex
 
+	// Filter out already-processed targets if resuming
+	var targetsToProcess []targets.Target
+	skippedCount := 0
+	for _, target := range loadedTargets {
+		if cpManager.IsTargetProcessed(target) {
+			skippedCount++
+			continue
+		}
+		targetsToProcess = append(targetsToProcess, target)
+	}
+
+	if skippedCount > 0 {
+		log.Info(fmt.Sprintf("Skipping %d already-processed targets, %d remaining",
+			skippedCount, len(targetsToProcess)))
+	}
+
 	// Start progress tracker
 	tracker := status.NewProgressTracker(results, &resultsLock, len(loadedTargets))
 	tracker.Start()
+
+	// Start checkpoint manager
+	getStats := func() checkpoint.Statistics {
+		resultsLock.Lock()
+		defer resultsLock.Unlock()
+		return checkpoint.Statistics{
+			Success:              results.Success,
+			Errors:               results.Errors,
+			SharesTotal:          results.SharesTotal,
+			SharesProcessed:      results.SharesProcessed,
+			FilesTotal:           results.FilesTotal,
+			FilesProcessed:       results.FilesProcessed,
+			DirectoriesTotal:     results.DirectoriesTotal,
+			DirectoriesProcessed: results.DirectoriesProcessed,
+		}
+	}
+	cpManager.Start(og, len(loadedTargets), getStats)
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	stopChan := make(chan struct{})
+
+	go func() {
+		sig := <-sigChan
+		log.Warning(fmt.Sprintf("Received signal %v, saving checkpoint and shutting down...", sig))
+		cpManager.TriggerSave()
+		close(stopChan)
+	}()
 
 	// Process targets concurrently
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, threads)
 
-	for _, target := range loadedTargets {
+	for _, target := range targetsToProcess {
+		// Check for stop signal
+		select {
+		case <-stopChan:
+			log.Info("Stop signal received, waiting for current tasks to complete...")
+			break
+		default:
+		}
+
 		wg.Add(1)
 		semaphore <- struct{}{}
 
@@ -271,11 +359,13 @@ func run(cmd *cobra.Command, args []string) {
 			defer func() { <-semaphore }()
 
 			worker.ProcessTarget(t, workerOpts, cfg, og, parsedRules, results, &resultsLock)
+			cpManager.MarkTargetProcessed(t)
 		}(target)
 	}
 
 	wg.Wait()
 	tracker.Stop()
+	cpManager.Stop()
 
 	// Export graph
 	log.Info(fmt.Sprintf("Exporting graph to \"%s\"", output))
@@ -295,6 +385,15 @@ func run(cmd *cobra.Command, args []string) {
 
 	// Print final summary
 	status.PrintFinalSummary(results, &resultsLock)
+
+	// Clean up checkpoint file on successful completion
+	if cpManager.IsEnabled() && len(targetsToProcess) == 0 || cpManager.GetProcessedCount() == len(loadedTargets) {
+		if err := checkpoint.Delete(cpManager.GetFilepath()); err == nil {
+			log.Info("Checkpoint file cleaned up (scan completed successfully)")
+		}
+	} else if cpManager.IsEnabled() {
+		log.Info(fmt.Sprintf("Checkpoint saved to %s (use --resume to continue)", cpManager.GetFilepath()))
+	}
 
 	elapsed := time.Since(startTime)
 	log.Info(fmt.Sprintf("ShareHound completed, time elapsed: %s", utils.DeltaTime(elapsed)))

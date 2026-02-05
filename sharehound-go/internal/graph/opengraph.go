@@ -122,3 +122,33 @@ func (g *OpenGraph) ToJSON() ([]byte, error) {
 
 	return json.MarshalIndent(output, "", "  ")
 }
+
+// GetNodesAndEdges returns copies of all nodes and edges for checkpointing.
+func (g *OpenGraph) GetNodesAndEdges() ([]*Node, []*Edge) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	nodes := make([]*Node, 0, len(g.nodes))
+	for _, node := range g.nodes {
+		nodes = append(nodes, node)
+	}
+
+	edges := make([]*Edge, len(g.edges))
+	copy(edges, g.edges)
+
+	return nodes, edges
+}
+
+// RestoreNodesAndEdges restores nodes and edges from a checkpoint.
+func (g *OpenGraph) RestoreNodesAndEdges(nodes []*Node, edges []*Edge) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.nodes = make(map[string]*Node, len(nodes))
+	for _, node := range nodes {
+		g.nodes[node.ID] = node
+	}
+
+	g.edges = make([]*Edge, len(edges))
+	copy(g.edges, edges)
+}

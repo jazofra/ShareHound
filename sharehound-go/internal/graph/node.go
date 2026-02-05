@@ -71,3 +71,35 @@ func (n *Node) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(m)
 }
+
+// UnmarshalJSON implements custom JSON unmarshaling for Node.
+func (n *Node) UnmarshalJSON(data []byte) error {
+	// Use a temporary struct to parse the JSON
+	var raw struct {
+		ID         string                 `json:"id"`
+		Kind       interface{}            `json:"kind"`
+		Properties map[string]interface{} `json:"properties"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	n.ID = raw.ID
+	n.Properties = raw.Properties
+
+	// Handle kind as either string or []string
+	switch v := raw.Kind.(type) {
+	case string:
+		n.Kinds = []string{v}
+	case []interface{}:
+		n.Kinds = make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				n.Kinds = append(n.Kinds, s)
+			}
+		}
+	}
+
+	return nil
+}
