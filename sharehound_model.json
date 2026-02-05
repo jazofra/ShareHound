@@ -1,0 +1,46 @@
+{
+  "custom_types": {
+    "NetworkShareBase": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "network-wired",
+        "color": "#8B9DC3"
+      }
+    },
+    "NetworkShareHost": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "server",
+        "color": "#6B8E23"
+      }
+    },
+    "NetworkShareSMB": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "folder-open",
+        "color": "#DAA520"
+      }
+    },
+    "NetworkShareDFS": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "sitemap",
+        "color": "#CD853F"
+      }
+    },
+    "File": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "file",
+        "color": "#87CEEB"
+      }
+    },
+    "Directory": {
+      "icon": {
+        "type": "font-awesome",
+        "name": "folder",
+        "color": "#F0E68C"
+      }
+    }
+  }
+}

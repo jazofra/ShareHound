@@ -4,7 +4,8 @@
 # Author             : Remi Gascou (@podalirius_)
 # Date created       : 12 Aug 2025
 
-from threading import Lock
+from threading import Lock, Event
+from typing import Optional
 
 from shareql.evaluate.evaluator import RulesEvaluator
 
@@ -22,6 +23,7 @@ def collect_contents_in_share(
     worker_results: dict,
     results_lock: Lock,
     logger: TaskLogger,
+    timeout_event: Optional[Event] = None,
 ):
     """
     Entry point function to collect contents in an SMB share using BFS traversal.
@@ -63,6 +65,7 @@ def collect_contents_in_share(
         results_lock=results_lock,
         logger=logger,
         depth=0,
+        timeout_event=timeout_event,
     )
 
     return (

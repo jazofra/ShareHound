@@ -20,11 +20,73 @@ from impacket.smb3structs import (DACL_SECURITY_INFORMATION,
                                   FILE_OPEN, FILE_READ_ATTRIBUTES,
                                   GROUP_SECURITY_INFORMATION,
                                   OWNER_SECURITY_INFORMATION, READ_CONTROL,
-                                  SMB2_0_INFO_SECURITY, SMB2_SEC_INFO_00)
+                                  SMB2_0_INFO_SECURITY, SMB2_SEC_INFO_00,
+                                  SMB2_DIALECT_002, SMB2_DIALECT_21, SMB2_DIALECT_30)
 from impacket.smbconnection import SessionError, SMBConnection
+from impacket.smb import SMB_DIALECT
 
 from sharehound.core.SIDResolver import SIDResolver
 from sharehound.utils.utils import STYPE_MASK, is_port_open
+
+
+class SMBErrorClassifier:
+    """Classifies SMB errors into categories for better handling and logging."""
+    
+    # Common SMB/NT Status codes
+    STATUS_NOT_SUPPORTED = 0xc00000bb
+    STATUS_ACCESS_DENIED = 0xc0000022
+    STATUS_LOGON_FAILURE = 0xc000006d
+    STATUS_ACCOUNT_DISABLED = 0xc0000072
+    STATUS_ACCOUNT_LOCKED_OUT = 0xc0000234
+    STATUS_PASSWORD_EXPIRED = 0xc0000071
+    STATUS_INVALID_LOGON_HOURS = 0xc000006f
+    STATUS_INVALID_WORKSTATION = 0xc0000070
+    STATUS_ACCOUNT_RESTRICTION = 0xc000006e
+    STATUS_BAD_NETWORK_NAME = 0xc00000cc
+    STATUS_CONNECTION_REFUSED = 0xc0000236
+    STATUS_NETWORK_UNREACHABLE = 0xc000023c
+    STATUS_HOST_UNREACHABLE = 0xc000023d
+    
+    @classmethod
+    def classify(cls, error: SessionError) -> tuple[str, str, bool]:
+        """
+        Classify an SMB SessionError.
+        
+        Returns:
+            tuple: (category, message, should_retry_with_different_dialect)
+        """
+        error_code = error.getErrorCode()
+        
+        # Protocol/dialect issues - retry with different dialect
+        if error_code == cls.STATUS_NOT_SUPPORTED:
+            return ("PROTOCOL", "SMB dialect or feature not supported by server", True)
+        
+        # Authentication failures - don't retry
+        if error_code == cls.STATUS_LOGON_FAILURE:
+            return ("AUTH", "Invalid username or password", False)
+        if error_code == cls.STATUS_ACCESS_DENIED:
+            return ("AUTH", "Access denied - insufficient privileges", False)
+        if error_code == cls.STATUS_ACCOUNT_DISABLED:
+            return ("AUTH", "Account is disabled", False)
+        if error_code == cls.STATUS_ACCOUNT_LOCKED_OUT:
+            return ("AUTH", "Account is locked out", False)
+        if error_code == cls.STATUS_PASSWORD_EXPIRED:
+            return ("AUTH", "Password has expired", False)
+        if error_code == cls.STATUS_INVALID_LOGON_HOURS:
+            return ("AUTH", "Login outside allowed hours", False)
+        if error_code == cls.STATUS_INVALID_WORKSTATION:
+            return ("AUTH", "Login from this workstation not allowed", False)
+        if error_code == cls.STATUS_ACCOUNT_RESTRICTION:
+            return ("AUTH", "Account restriction preventing login", False)
+        
+        # Network issues - don't retry with different dialect
+        if error_code == cls.STATUS_BAD_NETWORK_NAME:
+            return ("NETWORK", "Share or network name not found", False)
+        if error_code in (cls.STATUS_CONNECTION_REFUSED, cls.STATUS_NETWORK_UNREACHABLE, cls.STATUS_HOST_UNREACHABLE):
+            return ("NETWORK", "Network connectivity issue", False)
+        
+        # Unknown - might be worth retrying
+        return ("UNKNOWN", str(error), True)
 
 if TYPE_CHECKING:
     from impacket.smb import SharedFile
@@ -151,6 +213,9 @@ class SMBSession(object):
 
         This method sets up the SMB connection using either Kerberos or NTLM authentication based on the configuration.
         It attempts to connect to the SMB server specified by the `address` attribute and authenticate using the credentials provided during the object's initialization.
+        
+        If the initial connection fails with STATUS_NOT_SUPPORTED, it will automatically retry with older SMB dialects
+        (SMB3 -> SMB2.1 -> SMB2 -> SMB1) to maximize compatibility with different server configurations.
 
         The method will print debug information if the `debug` attribute is set to True. Upon successful connection and authentication, it sets the `connected` attribute to True.
 
@@ -164,115 +229,128 @@ class SMBSession(object):
             "[>] Connecting to remote SMB server '%s' ... " % str(self.host)
         )
 
-        try:
-            result, error = is_port_open(self.host, self.port, self.timeout)
-            if result:
-                self.smbClient = SMBConnection(
-                    remoteName=self.remote_name,
-                    remoteHost=self.host,
-                    myName=self.advertisedName,
-                    sess_port=int(self.port),
-                    timeout=self.timeout,
-                )
-                self.connected = True
-            else:
-                self.logger.debug(
-                    f"Could not connect to '{self.host}:{self.port}', {error}."
-                )
-                self.connected = False
-                return False
-        except OSError as err:
-            if self.config.debug:
-                traceback.print_exc()
+        # Check if port is open first
+        result, error = is_port_open(self.host, self.port, self.timeout)
+        if not result:
             self.logger.debug(
-                "Could not connect to '%s:%d': %s" % (self.host, int(self.port), err)
+                f"Could not connect to '{self.host}:{self.port}', {error}."
             )
             self.connected = False
             return False
 
-        if self.credentials.use_kerberos:
-            self.logger.debug(
-                "[>] Authenticating as '%s\\%s' with kerberos ... "
-                % (self.credentials.domain, self.credentials.username)
-            )
+        # Define dialects to try in order of preference (newest to oldest)
+        # None means let impacket negotiate automatically
+        dialects_to_try = [
+            (None, "auto-negotiate"),
+            (SMB2_DIALECT_30, "SMB 3.0"),
+            (SMB2_DIALECT_21, "SMB 2.1"),
+            (SMB2_DIALECT_002, "SMB 2.0"),
+            (SMB_DIALECT, "SMB 1.0"),
+        ]
+
+        last_error = None
+        last_error_category = None
+        
+        for dialect, dialect_name in dialects_to_try:
             try:
-                self.connected = self.smbClient.kerberosLogin(
-                    user=self.credentials.username,
-                    password=self.credentials.password,
-                    domain=self.credentials.domain,
-                    lmhash=self.credentials.lm_hex,
-                    nthash=self.credentials.nt_hex,
-                    aesKey=self.credentials.aesKey,
-                    kdcHost=self.credentials.kdcHost,
-                )
+                self.logger.debug(f"[>] Trying connection with {dialect_name}...")
+                
+                # Create SMB connection with specific dialect
+                if dialect is None:
+                    self.smbClient = SMBConnection(
+                        remoteName=self.remote_name,
+                        remoteHost=self.host,
+                        myName=self.advertisedName,
+                        sess_port=int(self.port),
+                        timeout=self.timeout,
+                    )
+                else:
+                    self.smbClient = SMBConnection(
+                        remoteName=self.remote_name,
+                        remoteHost=self.host,
+                        myName=self.advertisedName,
+                        sess_port=int(self.port),
+                        timeout=self.timeout,
+                        preferredDialect=dialect,
+                    )
+                
+                # Try to authenticate
+                auth_result = self._authenticate()
+                
+                if auth_result:
+                    self.connected = True
+                    self.logger.debug(
+                        f"[+] Successfully authenticated to '{self.host}' as '{self.credentials.domain}\\{self.credentials.username}' using {dialect_name}!"
+                    )
+                    break
+                else:
+                    # Authentication failed but connection worked - don't retry with different dialect
+                    self.logger.debug(
+                        f"Authentication failed to '{self.host}' as '{self.credentials.domain}\\{self.credentials.username}'"
+                    )
+                    self.connected = False
+                    return False
+                    
             except SessionError as err:
+                category, message, should_retry = SMBErrorClassifier.classify(err)
+                last_error = err
+                last_error_category = category
+                
+                self.logger.debug(f"[{category}] {dialect_name} failed: {message}")
+                
+                if not should_retry:
+                    # Don't retry for auth failures or network issues
+                    self.logger.debug(f"Not retrying due to {category} error")
+                    self.connected = False
+                    return False
+                    
+                # Close the failed connection before retrying
+                if self.smbClient is not None:
+                    try:
+                        self.smbClient.close()
+                    except Exception:
+                        pass
+                    self.smbClient = None
+                    
+                # Continue to try next dialect
+                continue
+                
+            except OSError as err:
                 if self.config.debug:
                     traceback.print_exc()
-                self.logger.debug("Could not login: %s" % err)
-                self.connected = False
-
-        else:
-            if len(self.credentials.lm_hex) != 0 and len(self.credentials.nt_hex) != 0:
                 self.logger.debug(
-                    "[>] Authenticating as '%s\\%s' with NTLM with pass the hash ... "
-                    % (self.credentials.domain, self.credentials.username)
+                    f"[NETWORK] Could not connect to '{self.host}:{self.port}': {err}"
                 )
-                try:
-                    # self.logger.debug("  | user     = %s" % self.credentials.username)
-                    # self.logger.debug("  | password = %s" % self.credentials.password)
-                    # self.logger.debug("  | domain   = %s" % self.credentials.domain)
-                    # self.logger.debug("  | lmhash   = %s" % self.credentials.lm_hex)
-                    # self.logger.debug("  | nthash   = %s" % self.credentials.nt_hex)
+                self.connected = False
+                return False
+            
+            except Exception as err:
+                if self.config.debug:
+                    traceback.print_exc()
+                self.logger.debug(f"[ERROR] Unexpected error with {dialect_name}: {err}")
+                
+                # Close and try next dialect
+                if self.smbClient is not None:
+                    try:
+                        self.smbClient.close()
+                    except Exception:
+                        pass
+                    self.smbClient = None
+                continue
 
-                    self.connected = self.smbClient.login(
-                        user=self.credentials.username,
-                        password=self.credentials.password,
-                        domain=self.credentials.domain,
-                        lmhash=self.credentials.lm_hex,
-                        nthash=self.credentials.nt_hex,
-                    )
-                except SessionError as err:
-                    if self.config.debug:
-                        traceback.print_exc()
-                    self.logger.debug("Could not login: %s" % err)
-                    self.connected = False
-
+        # If we exhausted all dialects without success
+        if not self.connected:
+            if last_error:
+                self.logger.debug(
+                    f"Failed to connect to '{self.host}' after trying all SMB dialects. Last error [{last_error_category}]: {last_error}"
+                )
             else:
                 self.logger.debug(
-                    "[>] Authenticating as '%s\\%s' with NTLM with password ... "
-                    % (self.credentials.domain, self.credentials.username)
+                    f"Failed to connect to '{self.host}' - unknown error"
                 )
-                try:
-                    # self.logger.debug("  | user     = %s" % self.credentials.username)
-                    # self.logger.debug("  | password = %s" % self.credentials.password)
-                    # self.logger.debug("  | domain   = %s" % self.credentials.domain)
-                    # self.logger.debug("  | lmhash   = %s" % self.credentials.lm_hex)
-                    # self.logger.debug("  | nthash   = %s" % self.credentials.nt_hex)
+            return False
 
-                    self.connected = self.smbClient.login(
-                        user=self.credentials.username,
-                        password=self.credentials.password,
-                        domain=self.credentials.domain,
-                        lmhash=self.credentials.lm_hex,
-                        nthash=self.credentials.nt_hex,
-                    )
-                except SessionError as err:
-                    if self.config.debug:
-                        traceback.print_exc()
-                    self.logger.debug("Could not login: %s" % err)
-                    self.connected = False
-
-        if self.connected:
-            self.logger.debug(
-                "[+] Successfully authenticated to '%s' as '%s\\%s'!"
-                % (self.host, self.credentials.domain, self.credentials.username)
-            )
-        else:
-            self.logger.debug(
-                "Failed to authenticate to '%s' as '%s\\%s'!"
-                % (self.host, self.credentials.domain, self.credentials.username)
-            )
-
+        # Initialize additional services if connected
         if self.connected:
             try:
                 self.sid_resolver = SIDResolver(self.smbClient)
@@ -292,6 +370,51 @@ class SMBSession(object):
                 self.logger.debug(f"Could not initialize connection to srvsvc: {err}")
 
         return self.connected
+
+    def _authenticate(self) -> bool:
+        """
+        Performs authentication against the SMB server.
+        
+        Returns:
+            bool: True if authentication successful, False otherwise.
+        """
+        try:
+            if self.credentials.use_kerberos:
+                self.logger.debug(
+                    "[>] Authenticating as '%s\\%s' with kerberos ... "
+                    % (self.credentials.domain, self.credentials.username)
+                )
+                return self.smbClient.kerberosLogin(
+                    user=self.credentials.username,
+                    password=self.credentials.password,
+                    domain=self.credentials.domain,
+                    lmhash=self.credentials.lm_hex,
+                    nthash=self.credentials.nt_hex,
+                    aesKey=self.credentials.aesKey,
+                    kdcHost=self.credentials.kdcHost,
+                )
+            else:
+                if len(self.credentials.lm_hex) != 0 and len(self.credentials.nt_hex) != 0:
+                    self.logger.debug(
+                        "[>] Authenticating as '%s\\%s' with NTLM pass-the-hash ... "
+                        % (self.credentials.domain, self.credentials.username)
+                    )
+                else:
+                    self.logger.debug(
+                        "[>] Authenticating as '%s\\%s' with NTLM password ... "
+                        % (self.credentials.domain, self.credentials.username)
+                    )
+                
+                return self.smbClient.login(
+                    user=self.credentials.username,
+                    password=self.credentials.password,
+                    domain=self.credentials.domain,
+                    lmhash=self.credentials.lm_hex,
+                    nthash=self.credentials.nt_hex,
+                )
+        except SessionError as err:
+            # Re-raise to be handled by caller with dialect fallback logic
+            raise
 
     def ping_smb_session(self) -> bool:
         """
@@ -755,8 +878,86 @@ class SMBSession(object):
             except Exception:
                 pass
 
-        # Not found.
+        # Not found via registry.
         return None
+
+    def get_share_root_security_descriptor(
+        self,
+        share_name: str,
+    ) -> Optional[bytes]:
+        """
+        Get the NTFS security descriptor of the share's root folder.
+        
+        This is a fallback method when the share-level security descriptor cannot be
+        obtained (e.g., due to insufficient privileges or remote registry being disabled).
+        
+        While this returns NTFS permissions rather than share-level permissions, the root
+        folder's permissions are often the most relevant for understanding access control.
+        
+        Args:
+            share_name (str): The name of the share to get the root security descriptor for.
+            
+        Returns:
+            Optional[bytes]: The raw security descriptor bytes, or None if retrieval fails.
+        """
+        try:
+            # We need to connect to the share if not already connected
+            original_share = getattr(self, 'current_share', None)
+            original_tree_id = self.smb_tree_id
+            
+            # Connect to the target share
+            try:
+                tree_id = self.smbClient.connectTree(share_name)
+                self.smb_tree_id = tree_id
+            except Exception as e:
+                self.logger.debug(f"Could not connect to share '{share_name}' for root SD: {e}")
+                return None
+                
+            try:
+                # Open the root directory of the share
+                file_id = self.smbClient.getSMBServer().create(
+                    self.smb_tree_id,
+                    "",  # Empty path = root of the share
+                    READ_CONTROL | FILE_READ_ATTRIBUTES,
+                    0,
+                    FILE_DIRECTORY_FILE,
+                    FILE_OPEN,
+                    0,
+                )
+                
+                try:
+                    # Query the security descriptor
+                    rawNtSecurityDescriptor = self.smbClient.getSMBServer().queryInfo(
+                        self.smb_tree_id,
+                        file_id,
+                        infoType=SMB2_0_INFO_SECURITY,
+                        fileInfoClass=SMB2_SEC_INFO_00,
+                        additionalInformation=OWNER_SECURITY_INFORMATION
+                        | DACL_SECURITY_INFORMATION
+                        | GROUP_SECURITY_INFORMATION,
+                        flags=0,
+                    )
+                    
+                    return rawNtSecurityDescriptor
+                    
+                finally:
+                    # Close the file handle
+                    try:
+                        self.smbClient.getSMBServer().close(self.smb_tree_id, file_id)
+                    except Exception:
+                        pass
+                        
+            finally:
+                # Disconnect from the share and restore original state
+                try:
+                    self.smbClient.disconnectTree(tree_id)
+                except Exception:
+                    pass
+                self.smb_tree_id = original_tree_id
+                    
+        except Exception as e:
+            self.logger.debug(f"Could not get root folder security descriptor for share '{share_name}': {e}")
+            return None
 
     def list_shares(self) -> dict[str, dict]:
         """

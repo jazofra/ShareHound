@@ -6,7 +6,8 @@
 
 import ntpath
 import os
-from threading import Lock
+from threading import Lock, Event
+from typing import Optional
 
 from bhopengraph.Node import Node
 from bhopengraph.Properties import Properties
@@ -44,7 +45,8 @@ def collect_contents_at_depth(
     worker_results: dict,
     results_lock: Lock,
     logger: TaskLogger,
-    depth=0,
+    depth: int = 0,
+    timeout_event: Optional[Event] = None,
 ):
     """
     Recursive function to perform BFS traversal of file share directories.
@@ -74,6 +76,18 @@ def collect_contents_at_depth(
     total_directory_count = 0
     skipped_directories_count = 0
     processed_directories_count = 0
+
+    # Check if timeout has been reached
+    if timeout_event is not None and timeout_event.is_set():
+        logger.debug("Timeout reached, stopping directory traversal")
+        return (
+            total_file_count,
+            skipped_files_count,
+            processed_files_count,
+            total_directory_count,
+            skipped_directories_count,
+            processed_directories_count,
+        )
 
     # Set the current share
     shareDisplayName = ogc.get_share().properties.get_property("displayName")
@@ -205,7 +219,8 @@ def collect_contents_at_depth(
             )
             ogc.set_element(file_node)
 
-            if rules_evaluator.can_process(ruleObjectFile):
+            can_process = rules_evaluator.can_process(ruleObjectFile)
+            if can_process:
                 ogc.add_path_to_graph()
                 processed_files_count += 1
                 # File processed → decrement pending exactly once
@@ -216,6 +231,11 @@ def collect_contents_at_depth(
 
     # Process next level directories (BFS approach)
     for directoryNode, element_rights in directories_to_explore_next:
+        # Check timeout before processing each directory
+        if timeout_event is not None and timeout_event.is_set():
+            logger.debug("Timeout reached, skipping remaining directories")
+            break
+
         logger.debug(f"📁 {directoryNode.properties['name']}")
 
         ogc.push_path(directoryNode, element_rights)
@@ -235,6 +255,7 @@ def collect_contents_at_depth(
             results_lock=results_lock,
             logger=logger,
             depth=(depth + 1),
+            timeout_event=timeout_event,
         )
         with results_lock:
             # Files counters

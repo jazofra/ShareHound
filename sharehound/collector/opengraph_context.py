@@ -6,13 +6,14 @@
 
 
 import ntpath
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from bhopengraph.Edge import Edge
 from bhopengraph.Node import Node
 from bhopengraph.OpenGraph import OpenGraph
 
 import sharehound.kinds as kinds
+from sharehound.core.Logger import Logger, TaskLogger
 
 
 class OpenGraphContext:
@@ -51,13 +52,17 @@ class OpenGraphContext:
     share: Optional[Tuple[Node, dict]]
     path: List[Tuple[Node, dict]]
     element: Optional[Tuple[Node, dict]]
+    logger: Optional[Union[Logger, TaskLogger]]
+    total_edges_created: int
 
-    def __init__(self, graph: OpenGraph):
+    def __init__(self, graph: OpenGraph, logger: Optional[Union[Logger, TaskLogger]] = None):
         self.graph = graph
         self.host = (None, {})
         self.share = (None, {})
         self.path = []
         self.element = (None, {})
+        self.logger = logger
+        self.total_edges_created = 0
 
     def add_path_to_graph(self) -> None:
         """
@@ -71,14 +76,39 @@ class OpenGraphContext:
         """
         # Set base host and share nodes
         if self.host is None:
+            if self.logger:
+                self.logger.debug("[add_path_to_graph] Host is None, skipping")
             return None
         self.graph.add_node_without_validation(self.host)
+        
+        # Add edge [HostsNetworkShare] from BloodHound Computer to NetworkShareHost
+        # This links the ShareHound graph to existing BloodHound Computer nodes
+        # by matching the Computer's name property (uppercase) to the NetworkShareHost's id
+        self.graph.add_edge_without_validation(
+            Edge(
+                start_node=self.host.id.upper(),
+                end_node=self.host.id,
+                kind=kinds.edge_kind_hosts_network_share,
+                start_match_by="name",
+                end_match_by="id",
+            )
+        )
+        self.total_edges_created += 1
+        if self.logger:
+            self.logger.debug(f"[add_path_to_graph] Created edge HostsNetworkShare: Computer(name={self.host.id.upper()}) -> NetworkShareHost(id={self.host.id})")
 
         share_node, share_rights = self.share
         if share_node is None:
+            if self.logger:
+                self.logger.debug("[add_path_to_graph] Share node is None, skipping")
             return None
         self.graph.add_node_without_validation(share_node)
-        self.add_rights_to_graph(share_node.id, share_rights)
+        
+        if self.logger:
+            rights_count = sum(len(edges) for edges in share_rights.values()) if share_rights else 0
+            self.logger.debug(f"[add_path_to_graph] Adding share '{share_node.id}' with {len(share_rights)} SID(s) and {rights_count} rights edge(s)")
+        
+        self.add_rights_to_graph(share_node.id, share_rights, "share")
 
         # Add edge [HasNetworkShare] from host to share
         self.graph.add_edge_without_validation(
@@ -88,6 +118,9 @@ class OpenGraphContext:
                 kind=kinds.edge_kind_has_network_share,
             )
         )
+        self.total_edges_created += 1
+        if self.logger:
+            self.logger.debug(f"[add_path_to_graph] Created edge HasNetworkShare: {self.host.id} -> {share_node.id}")
 
         # At this point we have created
         # (Host) --[HasNetworkShare]--> ((NetworkShareSMB|NetworkShareDFS))
@@ -97,7 +130,7 @@ class OpenGraphContext:
         for directory in self.path:
             directory_node, directory_rights = directory
             self.graph.add_node_without_validation(directory_node)
-            self.add_rights_to_graph(directory_node.id, directory_rights)
+            self.add_rights_to_graph(directory_node.id, directory_rights, "directory")
             self.graph.add_edge_without_validation(
                 Edge(
                     start_node=parent_id,
@@ -105,6 +138,9 @@ class OpenGraphContext:
                     kind=kinds.edge_kind_contains,
                 )
             )
+            self.total_edges_created += 1
+            if self.logger:
+                self.logger.debug(f"[add_path_to_graph] Created edge Contains: {parent_id} -> {directory_node.id}")
             parent_id = directory_node.id
 
         # At this point we have created
@@ -116,7 +152,7 @@ class OpenGraphContext:
         if element_node is None:
             return None
         self.graph.add_node_without_validation(element_node)
-        self.add_rights_to_graph(element_node.id, element_rights)
+        self.add_rights_to_graph(element_node.id, element_rights, "file")
 
         self.graph.add_edge_without_validation(
             Edge(
@@ -125,39 +161,40 @@ class OpenGraphContext:
                 kind=kinds.edge_kind_contains,
             )
         )
+        self.total_edges_created += 1
+        if self.logger:
+            self.logger.debug(f"[add_path_to_graph] Created edge Contains: {parent_id} -> {element_node.id}")
 
         # At this point we have created
         # (Host) --[Expose]--> ((NetworkShareSMB|NetworkShareDFS)) --[Contains]--> ((File)|(Directory))* --[Contains]--> ((File)|(Directory))
 
-    def add_rights_to_graph(self, element_id: str, rights: dict) -> None:
+    def add_rights_to_graph(self, element_id: str, rights: dict, element_type: str = "element") -> None:
         """
         Add rights to the graph
 
         Args:
             element_id: The id of the element
             rights: The rights to add
+            element_type: Type of element for logging (share, directory, file)
 
         Returns:
             None
         """
 
         if rights is None:
-            raise Exception("Rights are None in OpenGraphContext.add_rights_to_graph()")
+            if self.logger:
+                self.logger.warning(f"[add_rights_to_graph] Rights is None for {element_type}: {element_id}")
+            return
 
-        # existing_sids = []
+        if len(rights) == 0:
+            if self.logger:
+                self.logger.debug(f"[add_rights_to_graph] No rights to add for {element_type}: {element_id}")
+            return
+
+        edges_created_for_element = 0
         for sid, rights_edges in rights.items():
-            # Check if the sid is already in the graph
-            # And if not, add it
-            # if sid not in existing_sids:
-            #     # TODO: Needs to create nodes users and groups.
-            #     self.graph.add_node(
-            #         Node(
-            #             kinds=[kinds.node_kind_principal],
-            #             id=sid,
-            #         )
-            #     )
-            #     existing_sids.append(sid)
-
+            # Principal nodes (Users/Groups) already exist from AD collection
+            # Just create edges from SIDs to the share/file elements
             for right_edge in rights_edges:
                 self.graph.add_edge_without_validation(
                     Edge(
@@ -166,6 +203,13 @@ class OpenGraphContext:
                         kind=right_edge,
                     )
                 )
+                self.total_edges_created += 1
+                edges_created_for_element += 1
+                if self.logger:
+                    self.logger.debug(f"[add_rights_to_graph] Created edge: {sid} --[{right_edge}]--> {element_id}")
+
+        if self.logger:
+            self.logger.debug(f"[add_rights_to_graph] Created {edges_created_for_element} rights edge(s) for {element_type}: {element_id}")
 
     def push_path(self, node: Node, rights: dict):
         """
@@ -393,3 +437,28 @@ class OpenGraphContext:
             None
         """
         self.share = (None, {})
+
+    def get_total_edges_created(self) -> int:
+        """
+        Get the total number of edges created by this context.
+
+        Args:
+            None
+
+        Returns:
+            int: Total edges created
+        """
+        return self.total_edges_created
+
+    def log_summary(self) -> None:
+        """
+        Log a summary of edges created by this context.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self.logger:
+            self.logger.debug(f"[OpenGraphContext] Total edges created in this context: {self.total_edges_created}")
