@@ -8,19 +8,19 @@ import (
 
 // Common SMB/NT Status codes
 const (
-	STATUS_NOT_SUPPORTED      uint32 = 0xc00000bb
-	STATUS_ACCESS_DENIED      uint32 = 0xc0000022
-	STATUS_LOGON_FAILURE      uint32 = 0xc000006d
-	STATUS_ACCOUNT_DISABLED   uint32 = 0xc0000072
-	STATUS_ACCOUNT_LOCKED_OUT uint32 = 0xc0000234
-	STATUS_PASSWORD_EXPIRED   uint32 = 0xc0000071
+	STATUS_NOT_SUPPORTED       uint32 = 0xc00000bb
+	STATUS_ACCESS_DENIED       uint32 = 0xc0000022
+	STATUS_LOGON_FAILURE       uint32 = 0xc000006d
+	STATUS_ACCOUNT_DISABLED    uint32 = 0xc0000072
+	STATUS_ACCOUNT_LOCKED_OUT  uint32 = 0xc0000234
+	STATUS_PASSWORD_EXPIRED    uint32 = 0xc0000071
 	STATUS_INVALID_LOGON_HOURS uint32 = 0xc000006f
 	STATUS_INVALID_WORKSTATION uint32 = 0xc0000070
 	STATUS_ACCOUNT_RESTRICTION uint32 = 0xc000006e
-	STATUS_BAD_NETWORK_NAME   uint32 = 0xc00000cc
-	STATUS_CONNECTION_REFUSED uint32 = 0xc0000236
+	STATUS_BAD_NETWORK_NAME    uint32 = 0xc00000cc
+	STATUS_CONNECTION_REFUSED  uint32 = 0xc0000236
 	STATUS_NETWORK_UNREACHABLE uint32 = 0xc000023c
-	STATUS_HOST_UNREACHABLE   uint32 = 0xc000023d
+	STATUS_HOST_UNREACHABLE    uint32 = 0xc000023d
 )
 
 // Error categories
@@ -137,11 +137,11 @@ func ClassifyError(err error) ErrorClassification {
 
 // Common errors
 var (
-	ErrNotConnected      = errors.New("not connected to SMB server")
-	ErrShareNotSet       = errors.New("share not set")
-	ErrConnectionFailed  = errors.New("failed to connect to SMB server")
-	ErrAuthFailed        = errors.New("authentication failed")
-	ErrShareNotFound     = errors.New("share not found")
-	ErrAccessDenied      = errors.New("access denied")
-	ErrPathNotFound      = errors.New("path not found")
+	ErrNotConnected     = errors.New("not connected to SMB server")
+	ErrShareNotSet      = errors.New("share not set")
+	ErrConnectionFailed = errors.New("failed to connect to SMB server")
+	ErrAuthFailed       = errors.New("authentication failed")
+	ErrShareNotFound    = errors.New("share not found")
+	ErrAccessDenied     = errors.New("access denied")
+	ErrPathNotFound     = errors.New("path not found")
 )

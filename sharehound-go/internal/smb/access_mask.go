@@ -6,15 +6,15 @@ import "github.com/specterops/sharehound/pkg/kinds"
 // Share-level access mask flags
 const (
 	// Directory Service rights
-	DS_CREATE_CHILD           uint32 = 0x00000001
-	DS_DELETE_CHILD           uint32 = 0x00000002
-	DS_LIST_CONTENTS          uint32 = 0x00000004
+	DS_CREATE_CHILD            uint32 = 0x00000001
+	DS_DELETE_CHILD            uint32 = 0x00000002
+	DS_LIST_CONTENTS           uint32 = 0x00000004
 	DS_WRITE_PROPERTY_EXTENDED uint32 = 0x00000008
-	DS_READ_PROPERTY          uint32 = 0x00000010
-	DS_WRITE_PROPERTY         uint32 = 0x00000020
-	DS_DELETE_TREE            uint32 = 0x00000040
-	DS_LIST_OBJECT            uint32 = 0x00000080
-	DS_CONTROL_ACCESS         uint32 = 0x00000100
+	DS_READ_PROPERTY           uint32 = 0x00000010
+	DS_WRITE_PROPERTY          uint32 = 0x00000020
+	DS_DELETE_TREE             uint32 = 0x00000040
+	DS_LIST_OBJECT             uint32 = 0x00000080
+	DS_CONTROL_ACCESS          uint32 = 0x00000100
 
 	// Standard rights
 	ACCESS_DELETE       uint32 = 0x00010000

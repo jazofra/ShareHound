@@ -59,13 +59,13 @@ const (
 
 // SecurityDescriptor represents a Windows security descriptor.
 type SecurityDescriptor struct {
-	Revision    uint8
-	Sbz1        uint8
-	Control     uint16
-	OwnerSID    *SID
-	GroupSID    *SID
-	Sacl        *ACL
-	Dacl        *ACL
+	Revision uint8
+	Sbz1     uint8
+	Control  uint16
+	OwnerSID *SID
+	GroupSID *SID
+	Sacl     *ACL
+	Dacl     *ACL
 }
 
 // ACL represents an Access Control List.
