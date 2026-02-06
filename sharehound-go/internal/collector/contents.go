@@ -199,6 +199,14 @@ func collectContentsAtDepth(
 				SetProperty("Path", fullPath).
 				SetProperty("UNCPath", uncPath)
 
+			// Add timestamp properties if available
+			if !info.CreatedTime.IsZero() {
+				dirNode.SetProperty("createdAt", info.CreatedTime.Unix())
+			}
+			if !info.ModifiedTime.IsZero() {
+				dirNode.SetProperty("modifiedAt", info.ModifiedTime.Unix())
+			}
+
 			ogc.SetElement(dirNode)
 
 			// Add directory to graph if rules allow processing
@@ -257,6 +265,14 @@ func collectContentsAtDepth(
 				SetProperty("UNCPath", uncPath).
 				SetProperty("fileSize", info.Size).
 				SetProperty("extension", ext)
+
+			// Add timestamp properties if available
+			if !info.CreatedTime.IsZero() {
+				fileNode.SetProperty("createdAt", info.CreatedTime.Unix())
+			}
+			if !info.ModifiedTime.IsZero() {
+				fileNode.SetProperty("modifiedAt", info.ModifiedTime.Unix())
+			}
 
 			ogc.SetElement(fileNode)
 

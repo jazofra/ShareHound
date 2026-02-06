@@ -1,7 +1,10 @@
 package graph
 
 import (
+	"archive/zip"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -216,5 +219,99 @@ func TestOpenGraphOutputFormat(t *testing.T) {
 	}
 	if _, ok := startObj["id"]; !ok {
 		t.Error("Edge start missing 'id' field")
+	}
+}
+
+func TestExportToFileZip(t *testing.T) {
+	og := NewOpenGraph("ShareHound")
+
+	// Add some test data
+	for i := 0; i < 100; i++ {
+		node := NewNode("node"+string(rune('0'+i%10)), "TestType")
+		node.SetProperty("index", i)
+		og.AddNode(node)
+	}
+
+	for i := 0; i < 50; i++ {
+		edge := NewEdge("node"+string(rune('0'+i%10)), "node"+string(rune('0'+(i+1)%10)), "TestEdge")
+		og.AddEdge(edge)
+	}
+
+	// Create temp directory for test files
+	tmpDir := t.TempDir()
+
+	// Test regular JSON export
+	jsonFile := filepath.Join(tmpDir, "test.json")
+	if err := og.ExportToFile(jsonFile, true); err != nil {
+		t.Fatalf("Failed to export to JSON: %v", err)
+	}
+
+	// Test ZIP export
+	zipFile := filepath.Join(tmpDir, "test.zip")
+	if err := og.ExportToFile(zipFile, true); err != nil {
+		t.Fatalf("Failed to export to ZIP: %v", err)
+	}
+
+	// Verify JSON file is valid
+	jsonData, err := os.ReadFile(jsonFile)
+	if err != nil {
+		t.Fatalf("Failed to read JSON file: %v", err)
+	}
+	var jsonOutput map[string]interface{}
+	if err := json.Unmarshal(jsonData, &jsonOutput); err != nil {
+		t.Fatalf("JSON file is not valid JSON: %v", err)
+	}
+
+	// Verify ZIP file can be opened and contains valid JSON
+	zipReader, err := zip.OpenReader(zipFile)
+	if err != nil {
+		t.Fatalf("Failed to open ZIP file: %v", err)
+	}
+	defer zipReader.Close()
+
+	if len(zipReader.File) != 1 {
+		t.Fatalf("Expected 1 file in ZIP, got %d", len(zipReader.File))
+	}
+
+	// Read the JSON from the ZIP entry
+	entry := zipReader.File[0]
+	t.Logf("ZIP entry name: %s", entry.Name)
+
+	entryReader, err := entry.Open()
+	if err != nil {
+		t.Fatalf("Failed to open ZIP entry: %v", err)
+	}
+	defer entryReader.Close()
+
+	var zipOutput map[string]interface{}
+	decoder := json.NewDecoder(entryReader)
+	if err := decoder.Decode(&zipOutput); err != nil {
+		t.Fatalf("ZIP file content is not valid JSON: %v", err)
+	}
+
+	// Verify both outputs have the same structure
+	jsonGraph := jsonOutput["graph"].(map[string]interface{})
+	zipGraph := zipOutput["graph"].(map[string]interface{})
+
+	jsonNodes := jsonGraph["nodes"].([]interface{})
+	zipNodes := zipGraph["nodes"].([]interface{})
+	if len(jsonNodes) != len(zipNodes) {
+		t.Errorf("Node count mismatch: JSON=%d, ZIP=%d", len(jsonNodes), len(zipNodes))
+	}
+
+	jsonEdges := jsonGraph["edges"].([]interface{})
+	zipEdges := zipGraph["edges"].([]interface{})
+	if len(jsonEdges) != len(zipEdges) {
+		t.Errorf("Edge count mismatch: JSON=%d, ZIP=%d", len(jsonEdges), len(zipEdges))
+	}
+
+	// Verify ZIP file is smaller
+	jsonStat, _ := os.Stat(jsonFile)
+	zipStat, _ := os.Stat(zipFile)
+	t.Logf("JSON size: %d bytes, ZIP size: %d bytes (%.1f%% of original)",
+		jsonStat.Size(), zipStat.Size(), float64(zipStat.Size())/float64(jsonStat.Size())*100)
+
+	if zipStat.Size() >= jsonStat.Size() {
+		t.Log("Warning: ZIP file is not smaller than JSON (may be expected for small files)")
 	}
 }

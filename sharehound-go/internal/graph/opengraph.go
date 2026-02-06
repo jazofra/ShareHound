@@ -2,8 +2,13 @@
 package graph
 
 import (
+	"archive/zip"
+	"bufio"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -93,36 +98,170 @@ type openGraphOutput struct {
 }
 
 // ExportToFile exports the graph to a JSON file in BloodHound OpenGraph format.
+// If the filename ends with .zip, the output will be ZIP compressed.
+// Uses streaming to handle large graphs without loading everything in memory.
 func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	// Collect nodes
-	nodes := make([]*Node, 0, len(g.nodes))
-	for _, node := range g.nodes {
-		nodes = append(nodes, node)
-	}
-
-	output := openGraphOutput{
-		Graph: openGraphData{
-			Nodes: nodes,
-			Edges: g.edges,
-		},
-	}
-
-	// Include metadata if requested and source kind is set
-	if includeMetadata && g.SourceKind != "" {
-		output.Metadata = &openGraphMetadata{
-			SourceKind: g.SourceKind,
-		}
-	}
-
-	data, err := json.MarshalIndent(output, "", "  ")
+	// Create output file
+	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	return os.WriteFile(filename, data, 0644)
+	// Use buffered writer for better performance
+	bufWriter := bufio.NewWriterSize(file, 64*1024) // 64KB buffer
+
+	// Determine if we should use ZIP compression
+	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
+		// Create ZIP writer
+		zipWriter := zip.NewWriter(bufWriter)
+
+		// Create entry for JSON file (use base name without .zip)
+		baseName := filepath.Base(filename)
+		jsonName := strings.TrimSuffix(baseName, ".zip")
+		if !strings.HasSuffix(jsonName, ".json") {
+			jsonName += ".json"
+		}
+
+		// Create compressed entry with maximum compression
+		header := &zip.FileHeader{
+			Name:   jsonName,
+			Method: zip.Deflate,
+		}
+		entryWriter, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		// Stream JSON to ZIP entry
+		if err := g.streamJSON(entryWriter, includeMetadata); err != nil {
+			return err
+		}
+
+		// Close ZIP writer
+		if err := zipWriter.Close(); err != nil {
+			return err
+		}
+	} else {
+		// Regular JSON output
+		if err := g.streamJSON(bufWriter, includeMetadata); err != nil {
+			return err
+		}
+	}
+
+	// Flush buffer
+	return bufWriter.Flush()
+}
+
+// streamJSON writes the graph as JSON to the writer in a streaming fashion.
+func (g *OpenGraph) streamJSON(w io.Writer, includeMetadata bool) error {
+	// Start the JSON object
+	if _, err := w.Write([]byte("{\n")); err != nil {
+		return err
+	}
+
+	// Write metadata if requested
+	if includeMetadata && g.SourceKind != "" {
+		if _, err := w.Write([]byte(`  "metadata": {"source_kind": "`)); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte(g.SourceKind)); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\"},\n")); err != nil {
+			return err
+		}
+	}
+
+	// Start graph object
+	if _, err := w.Write([]byte("  \"graph\": {\n")); err != nil {
+		return err
+	}
+
+	// Write nodes array - stream each node
+	if _, err := w.Write([]byte("    \"nodes\": [\n")); err != nil {
+		return err
+	}
+
+	nodeCount := 0
+	totalNodes := len(g.nodes)
+	for _, node := range g.nodes {
+		nodeJSON, err := json.Marshal(node)
+		if err != nil {
+			return err
+		}
+
+		if _, err := w.Write([]byte("      ")); err != nil {
+			return err
+		}
+		if _, err := w.Write(nodeJSON); err != nil {
+			return err
+		}
+
+		nodeCount++
+		if nodeCount < totalNodes {
+			if _, err := w.Write([]byte(",\n")); err != nil {
+				return err
+			}
+		} else {
+			if _, err := w.Write([]byte("\n")); err != nil {
+				return err
+			}
+		}
+	}
+
+	if _, err := w.Write([]byte("    ],\n")); err != nil {
+		return err
+	}
+
+	// Write edges array - stream each edge
+	if _, err := w.Write([]byte("    \"edges\": [\n")); err != nil {
+		return err
+	}
+
+	totalEdges := len(g.edges)
+	for i, edge := range g.edges {
+		edgeJSON, err := json.Marshal(edge)
+		if err != nil {
+			return err
+		}
+
+		if _, err := w.Write([]byte("      ")); err != nil {
+			return err
+		}
+		if _, err := w.Write(edgeJSON); err != nil {
+			return err
+		}
+
+		if i < totalEdges-1 {
+			if _, err := w.Write([]byte(",\n")); err != nil {
+				return err
+			}
+		} else {
+			if _, err := w.Write([]byte("\n")); err != nil {
+				return err
+			}
+		}
+	}
+
+	if _, err := w.Write([]byte("    ]\n")); err != nil {
+		return err
+	}
+
+	// Close graph object
+	if _, err := w.Write([]byte("  }\n")); err != nil {
+		return err
+	}
+
+	// Close root object
+	if _, err := w.Write([]byte("}\n")); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ToJSON returns the graph as JSON bytes in BloodHound OpenGraph format.

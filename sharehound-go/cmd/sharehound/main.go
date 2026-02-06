@@ -91,7 +91,7 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Debug mode")
 	rootCmd.Flags().BoolVar(&noColors, "no-colors", false, "Disable ANSI escape codes")
 	rootCmd.Flags().StringVar(&logfile, "logfile", "", "Log file to write to")
-	rootCmd.Flags().StringVarP(&output, "output", "o", "opengraph.json", "Output file to write to")
+	rootCmd.Flags().StringVarP(&output, "output", "o", "opengraph.zip", "Output file (use .zip extension for compression)")
 
 	// Advanced configuration
 	rootCmd.Flags().StringVar(&advertisedName, "advertised-name", "", "Advertised name of the client")
@@ -108,7 +108,7 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 
 	// Share exploration
 	rootCmd.Flags().StringVar(&shareName, "share", "", "Share to enumerate (default: all shares)")
-	rootCmd.Flags().IntVar(&depth, "depth", 3, "Maximum depth to traverse directories")
+	rootCmd.Flags().IntVar(&depth, "depth", 0, "Maximum depth to traverse directories (0 = unlimited)")
 	rootCmd.Flags().BoolVar(&includeCommonShares, "include-common-shares", false, "Include C$, ADMIN$, IPC$, PRINT$")
 
 	// Targets and authentication
