@@ -15,6 +15,7 @@ const (
 
 // QuerySecurityDescriptorLinked queries the security descriptor for a file or directory
 // using the medianexapp/go-smb2 fork which has native security descriptor support.
+// Returns nil, nil if the security descriptor cannot be retrieved (e.g., access denied).
 func QuerySecurityDescriptorLinked(share *smb2.Share, path string) ([]byte, error) {
 	if share == nil {
 		return nil, nil
@@ -27,6 +28,7 @@ func QuerySecurityDescriptorLinked(share *smb2.Share, path string) ([]byte, erro
 	sdBytes, err := share.SecurityInfoRaw(path, flags)
 	if err != nil {
 		// Return nil for access denied or other errors - this is expected for some files
+		// The caller can still list and traverse directories even without READ_CONTROL permission
 		return nil, nil
 	}
 
