@@ -2,13 +2,14 @@
 package smb
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path"
 	"strings"
 	"time"
 
-	"github.com/hirochachacha/go-smb2"
+	"github.com/medianexapp/go-smb2"
 	"github.com/specterops/sharehound/internal/config"
 	"github.com/specterops/sharehound/internal/credentials"
 	"github.com/specterops/sharehound/internal/logger"
@@ -115,8 +116,12 @@ func (s *SMBSession) Connect() error {
 		},
 	}
 
-	// Dial SMB session
-	session, err := dialer.Dial(conn)
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+
+	// Dial SMB session using DialConn with the existing connection
+	session, err := dialer.DialConn(ctx, conn, address)
 	if err != nil {
 		classification := ClassifyError(err)
 		s.log.Debug(fmt.Sprintf("[%s] Authentication failed: %s", classification.Category, classification.Message))
@@ -278,6 +283,7 @@ func (s *SMBSession) ListContents(dirPath string) (map[string]FileInfo, error) {
 }
 
 // GetFileSecurityDescriptor gets the NTFS security descriptor for a file or directory.
+// This uses go:linkname to access unexported go-smb2 internals for querying security descriptors.
 func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescriptor, error) {
 	if s.share == nil {
 		return nil, ErrShareNotSet
@@ -289,17 +295,20 @@ func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescri
 		fullPath = "."
 	}
 
-	// Try to open the file/directory
-	f, err := s.share.Open(fullPath)
+	// Try to get security descriptor using go:linkname approach
+	sdBytes, err := QuerySecurityDescriptorLinked(s.share, fullPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open '%s': %w", fullPath, err)
+		// Log debug but don't fail - this is expected in some cases
+		s.log.Debug(fmt.Sprintf("Could not get security descriptor for '%s': %v", fullPath, err))
+		return nil, nil
 	}
-	defer f.Close()
 
-	// Note: go-smb2 doesn't directly expose security descriptor queries
-	// We need to use SRVSVC for share-level or extend the library for file-level
-	// Return a specific error to trigger fallback handling
-	return nil, ErrSecurityDescriptorNotSupported
+	if len(sdBytes) == 0 {
+		return nil, nil
+	}
+
+	// Parse the security descriptor
+	return ParseSecurityDescriptor(sdBytes)
 }
 
 // GetShareSecurityDescriptor gets the share-level security descriptor via SRVSVC RPC.

@@ -201,8 +201,17 @@ func collectContentsAtDepth(
 
 			ogc.SetElement(dirNode)
 
+			// Add directory to graph if rules allow processing
 			if rulesEval.CanProcess(ruleDir) {
+				ogc.AddPathToGraph()
 				counts.ProcessedDirectories++
+
+				// Decrement pending
+				if resultsLock != nil {
+					resultsLock.Lock()
+					workerResults.DirectoriesPending--
+					resultsLock.Unlock()
+				}
 			}
 
 			// Add to list for next level

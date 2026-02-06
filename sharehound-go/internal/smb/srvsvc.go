@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"unicode/utf16"
 
-	"github.com/hirochachacha/go-smb2"
+	"github.com/medianexapp/go-smb2"
 )
 
 // SRVSVC RPC constants
