@@ -2,11 +2,12 @@
 package graph
 
 import (
+	"archive/zip"
 	"bufio"
-	"compress/gzip"
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -97,7 +98,7 @@ type openGraphOutput struct {
 }
 
 // ExportToFile exports the graph to a JSON file in BloodHound OpenGraph format.
-// If the filename ends with .gz, the output will be gzip compressed.
+// If the filename ends with .zip, the output will be ZIP compressed.
 // Uses streaming to handle large graphs without loading everything in memory.
 func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	g.mu.RLock()
@@ -113,26 +114,40 @@ func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	// Use buffered writer for better performance
 	bufWriter := bufio.NewWriterSize(file, 64*1024) // 64KB buffer
 
-	// Determine if we should use gzip compression
-	var writer io.Writer = bufWriter
-	var gzWriter *gzip.Writer
-	if strings.HasSuffix(strings.ToLower(filename), ".gz") {
-		gzWriter, err = gzip.NewWriterLevel(bufWriter, gzip.BestSpeed)
+	// Determine if we should use ZIP compression
+	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
+		// Create ZIP writer
+		zipWriter := zip.NewWriter(bufWriter)
+
+		// Create entry for JSON file (use base name without .zip)
+		baseName := filepath.Base(filename)
+		jsonName := strings.TrimSuffix(baseName, ".zip")
+		if !strings.HasSuffix(jsonName, ".json") {
+			jsonName += ".json"
+		}
+
+		// Create compressed entry with maximum compression
+		header := &zip.FileHeader{
+			Name:   jsonName,
+			Method: zip.Deflate,
+		}
+		entryWriter, err := zipWriter.CreateHeader(header)
 		if err != nil {
 			return err
 		}
-		defer gzWriter.Close()
-		writer = gzWriter
-	}
 
-	// Stream the JSON output
-	if err := g.streamJSON(writer, includeMetadata); err != nil {
-		return err
-	}
+		// Stream JSON to ZIP entry
+		if err := g.streamJSON(entryWriter, includeMetadata); err != nil {
+			return err
+		}
 
-	// Flush gzip writer if used
-	if gzWriter != nil {
-		if err := gzWriter.Close(); err != nil {
+		// Close ZIP writer
+		if err := zipWriter.Close(); err != nil {
+			return err
+		}
+	} else {
+		// Regular JSON output
+		if err := g.streamJSON(bufWriter, includeMetadata); err != nil {
 			return err
 		}
 	}
