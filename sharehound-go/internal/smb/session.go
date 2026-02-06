@@ -283,7 +283,7 @@ func (s *SMBSession) ListContents(dirPath string) (map[string]FileInfo, error) {
 }
 
 // GetFileSecurityDescriptor gets the NTFS security descriptor for a file or directory.
-// This uses go:linkname to access unexported go-smb2 internals for querying security descriptors.
+// This uses the medianexapp/go-smb2 fork which has native SecurityInfoRaw() support.
 func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescriptor, error) {
 	if s.share == nil {
 		return nil, ErrShareNotSet
