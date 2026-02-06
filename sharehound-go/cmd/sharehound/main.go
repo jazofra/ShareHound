@@ -373,7 +373,7 @@ func run(cmd *cobra.Command, args []string) {
 	log.Info(fmt.Sprintf("Nodes: %d", og.GetNodeCount()))
 	log.Info(fmt.Sprintf("Edges: %d", og.GetEdgeCount()))
 
-	if err := og.ExportToFile(output, false); err != nil {
+	if err := og.ExportToFile(output, true); err != nil {
 		log.Error(fmt.Sprintf("Failed to export graph: %v", err))
 		os.Exit(1)
 	}
