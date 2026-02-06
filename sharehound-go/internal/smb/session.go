@@ -2,13 +2,14 @@
 package smb
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path"
 	"strings"
 	"time"
 
-	"github.com/hirochachacha/go-smb2"
+	"github.com/medianexapp/go-smb2"
 	"github.com/specterops/sharehound/internal/config"
 	"github.com/specterops/sharehound/internal/credentials"
 	"github.com/specterops/sharehound/internal/logger"
@@ -115,8 +116,12 @@ func (s *SMBSession) Connect() error {
 		},
 	}
 
-	// Dial SMB session
-	session, err := dialer.Dial(conn)
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+
+	// Dial SMB session using DialConn with the existing connection
+	session, err := dialer.DialConn(ctx, conn, address)
 	if err != nil {
 		classification := ClassifyError(err)
 		s.log.Debug(fmt.Sprintf("[%s] Authentication failed: %s", classification.Category, classification.Message))
@@ -278,9 +283,7 @@ func (s *SMBSession) ListContents(dirPath string) (map[string]FileInfo, error) {
 }
 
 // GetFileSecurityDescriptor gets the NTFS security descriptor for a file or directory.
-// Note: The go-smb2 library doesn't support SMB2 QUERY_INFO for security descriptors.
-// This function attempts to verify file access but cannot retrieve NTFS ACLs.
-// Share-level permissions are still collected via SRVSVC RPC.
+// This uses go:linkname to access unexported go-smb2 internals for querying security descriptors.
 func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescriptor, error) {
 	if s.share == nil {
 		return nil, ErrShareNotSet
@@ -292,22 +295,20 @@ func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescri
 		fullPath = "."
 	}
 
-	// Try to open the file/directory to verify access
-	f, err := s.share.Open(fullPath)
+	// Try to get security descriptor using go:linkname approach
+	sdBytes, err := QuerySecurityDescriptorLinked(s.share, fullPath)
 	if err != nil {
-		// File not accessible - silently return nil
+		// Log debug but don't fail - this is expected in some cases
+		s.log.Debug(fmt.Sprintf("Could not get security descriptor for '%s': %v", fullPath, err))
 		return nil, nil
 	}
-	defer f.Close()
 
-	// The go-smb2 library doesn't expose SMB2 QUERY_INFO security requests.
-	// To fully support NTFS security descriptors, we would need to either:
-	// 1. Fork go-smb2 to add security descriptor query support
-	// 2. Implement raw SMB2 protocol handling
-	// 3. Use a different SMB library that supports this functionality
-	//
-	// For now, return nil - share-level permissions are still collected via SRVSVC.
-	return nil, nil
+	if len(sdBytes) == 0 {
+		return nil, nil
+	}
+
+	// Parse the security descriptor
+	return ParseSecurityDescriptor(sdBytes)
 }
 
 // GetShareSecurityDescriptor gets the share-level security descriptor via SRVSVC RPC.
