@@ -117,3 +117,18 @@ var WellKnownSIDs = map[string]string{
 func GetWellKnownName(sidString string) string {
 	return WellKnownSIDs[sidString]
 }
+
+// IsEveryone returns true if this is the Everyone SID (S-1-1-0).
+func (s *SID) IsEveryone() bool {
+	return s.String() == "S-1-1-0"
+}
+
+// IsBuiltinAdministrators returns true if this is the Administrators SID (S-1-5-32-544).
+func (s *SID) IsBuiltinAdministrators() bool {
+	return s.String() == "S-1-5-32-544"
+}
+
+// IsLocalSystem returns true if this is the Local System SID (S-1-5-18).
+func (s *SID) IsLocalSystem() bool {
+	return s.String() == "S-1-5-18"
+}

@@ -8,7 +8,7 @@ import (
 // Node represents a node in the OpenGraph.
 type Node struct {
 	ID         string                 `json:"id"`
-	Kinds      []string               `json:"kind,omitempty"`
+	Kinds      []string               `json:"kinds,omitempty"`
 	Properties map[string]interface{} `json:"properties,omitempty"`
 }
 
@@ -57,11 +57,9 @@ func (n *Node) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 	m["id"] = n.ID
 
-	// Add kind as a single string if only one, or array if multiple
-	if len(n.Kinds) == 1 {
-		m["kind"] = n.Kinds[0]
-	} else if len(n.Kinds) > 1 {
-		m["kind"] = n.Kinds
+	// BloodHound schema requires "kinds" as an array
+	if len(n.Kinds) > 0 {
+		m["kinds"] = n.Kinds
 	}
 
 	// Add properties
@@ -70,4 +68,44 @@ func (n *Node) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(m)
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for Node.
+func (n *Node) UnmarshalJSON(data []byte) error {
+	// Use a temporary struct to parse the JSON
+	// Support both "kind" (legacy) and "kinds" (BloodHound schema)
+	var raw struct {
+		ID         string                 `json:"id"`
+		Kind       interface{}            `json:"kind"`
+		Kinds      interface{}            `json:"kinds"`
+		Properties map[string]interface{} `json:"properties"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	n.ID = raw.ID
+	n.Properties = raw.Properties
+
+	// Prefer "kinds" (BloodHound schema), fall back to "kind" (legacy)
+	kindData := raw.Kinds
+	if kindData == nil {
+		kindData = raw.Kind
+	}
+
+	// Handle kind/kinds as either string or []string
+	switch v := kindData.(type) {
+	case string:
+		n.Kinds = []string{v}
+	case []interface{}:
+		n.Kinds = make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				n.Kinds = append(n.Kinds, s)
+			}
+		}
+	}
+
+	return nil
 }

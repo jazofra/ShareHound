@@ -2,7 +2,6 @@
 package smb
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"path"
@@ -53,6 +52,9 @@ type SMBSession struct {
 	availableShares map[string]ShareInfo
 	currentShare    string
 	currentCwd      string
+
+	// SRVSVC client for share-level security descriptors
+	srvsvcClient *SRVSVCClient
 }
 
 // NewSMBSession creates a new SMBSession.
@@ -133,6 +135,10 @@ func (s *SMBSession) Connect() error {
 
 // Close closes the SMB session.
 func (s *SMBSession) Close() error {
+	if s.srvsvcClient != nil {
+		s.srvsvcClient.Close()
+		s.srvsvcClient = nil
+	}
 	if s.share != nil {
 		s.share.Umount()
 		s.share = nil
@@ -279,34 +285,51 @@ func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescri
 
 	// Normalize path
 	fullPath := strings.ReplaceAll(filePath, "/", "\\")
+	if fullPath == "" {
+		fullPath = "."
+	}
 
-	// Use SMB2 to get security info
-	ctx := context.Background()
-
-	// Open the file/directory with read-only access
+	// Try to open the file/directory
 	f, err := s.share.Open(fullPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open '%s': %w", fullPath, err)
 	}
 	defer f.Close()
 
-	// Try to get security descriptor using the underlying SMB2 API
-	// Note: go-smb2 doesn't directly expose security descriptor queries,
-	// so this is a simplified implementation
-	_ = ctx
-
-	return nil, fmt.Errorf("security descriptor query not fully supported")
+	// Note: go-smb2 doesn't directly expose security descriptor queries
+	// We need to use SRVSVC for share-level or extend the library for file-level
+	// Return a specific error to trigger fallback handling
+	return nil, ErrSecurityDescriptorNotSupported
 }
 
-// GetShareSecurityDescriptor gets the share-level security descriptor.
-// Note: This requires SRVSVC RPC which go-smb2 doesn't directly support.
+// GetShareSecurityDescriptor gets the share-level security descriptor via SRVSVC RPC.
 func (s *SMBSession) GetShareSecurityDescriptor(shareName string) ([]byte, error) {
-	// This would require implementing SRVSVC RPC calls
-	// For now, return nil to trigger fallback to root folder permissions
-	return nil, fmt.Errorf("share security descriptor query requires SRVSVC RPC")
+	if !s.connected {
+		return nil, ErrNotConnected
+	}
+
+	// Try to initialize SRVSVC client if not already done
+	if s.srvsvcClient == nil {
+		client, err := NewSRVSVCClient(s.session)
+		if err != nil {
+			s.log.Debug(fmt.Sprintf("Failed to create SRVSVC client: %v", err))
+			return nil, fmt.Errorf("SRVSVC not available: %w", err)
+		}
+		s.srvsvcClient = client
+	}
+
+	// Query share security descriptor via SRVSVC
+	sd, err := s.srvsvcClient.GetShareSecurityDescriptor(s.remoteName, shareName)
+	if err != nil {
+		s.log.Debug(fmt.Sprintf("Failed to get share security descriptor via SRVSVC: %v", err))
+		return nil, err
+	}
+
+	return sd, nil
 }
 
 // GetShareRootSecurityDescriptor gets the NTFS security descriptor of the share root.
+// This is used as a fallback when SRVSVC is not available.
 func (s *SMBSession) GetShareRootSecurityDescriptor(shareName string) ([]byte, error) {
 	// Save current share
 	originalShare := s.currentShare
@@ -323,16 +346,28 @@ func (s *SMBSession) GetShareRootSecurityDescriptor(shareName string) ([]byte, e
 		}
 	}()
 
-	// Get security descriptor for root
-	sd, err := s.GetFileSecurityDescriptor("")
+	// Try to open root and verify access
+	f, err := s.share.Open(".")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open share root: %w", err)
+	}
+	defer f.Close()
+
+	// Get file stat to verify we have access
+	_, err = f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat share root: %w", err)
 	}
 
-	// Serialize the security descriptor
-	// This is a placeholder - actual serialization would be needed
-	_ = sd
-	return nil, fmt.Errorf("security descriptor serialization not implemented")
+	// go-smb2 doesn't expose security descriptor queries
+	// Log that we have access but can't get SD
+	s.log.Debug(fmt.Sprintf("Share root '%s' accessible but SD query not supported", shareName))
+	return nil, ErrSecurityDescriptorNotSupported
+}
+
+// GetSession returns the underlying SMB2 session.
+func (s *SMBSession) GetSession() *smb2.Session {
+	return s.session
 }
 
 // GetRemoteName returns the remote server name.

@@ -137,11 +137,12 @@ func ClassifyError(err error) ErrorClassification {
 
 // Common errors
 var (
-	ErrNotConnected     = errors.New("not connected to SMB server")
-	ErrShareNotSet      = errors.New("share not set")
-	ErrConnectionFailed = errors.New("failed to connect to SMB server")
-	ErrAuthFailed       = errors.New("authentication failed")
-	ErrShareNotFound    = errors.New("share not found")
-	ErrAccessDenied     = errors.New("access denied")
-	ErrPathNotFound     = errors.New("path not found")
+	ErrNotConnected                   = errors.New("not connected to SMB server")
+	ErrShareNotSet                    = errors.New("share not set")
+	ErrConnectionFailed               = errors.New("failed to connect to SMB server")
+	ErrAuthFailed                     = errors.New("authentication failed")
+	ErrShareNotFound                  = errors.New("share not found")
+	ErrAccessDenied                   = errors.New("access denied")
+	ErrPathNotFound                   = errors.New("path not found")
+	ErrSecurityDescriptorNotSupported = errors.New("security descriptor query not supported")
 )

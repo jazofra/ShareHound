@@ -75,13 +75,24 @@ func (g *OpenGraph) GetEdgeCount() int {
 	return len(g.edges)
 }
 
-// openGraphOutput represents the JSON output format.
-type openGraphOutput struct {
-	Data  []*Node `json:"data"`
+// openGraphData represents the graph portion of the output.
+type openGraphData struct {
+	Nodes []*Node `json:"nodes"`
 	Edges []*Edge `json:"edges"`
 }
 
-// ExportToFile exports the graph to a JSON file.
+// openGraphMetadata represents the metadata portion of the output.
+type openGraphMetadata struct {
+	SourceKind string `json:"source_kind,omitempty"`
+}
+
+// openGraphOutput represents the BloodHound OpenGraph JSON format.
+type openGraphOutput struct {
+	Metadata *openGraphMetadata `json:"metadata,omitempty"`
+	Graph    openGraphData      `json:"graph"`
+}
+
+// ExportToFile exports the graph to a JSON file in BloodHound OpenGraph format.
 func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -93,8 +104,17 @@ func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	}
 
 	output := openGraphOutput{
-		Data:  nodes,
-		Edges: g.edges,
+		Graph: openGraphData{
+			Nodes: nodes,
+			Edges: g.edges,
+		},
+	}
+
+	// Include metadata if requested and source kind is set
+	if includeMetadata && g.SourceKind != "" {
+		output.Metadata = &openGraphMetadata{
+			SourceKind: g.SourceKind,
+		}
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")
@@ -105,7 +125,7 @@ func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	return os.WriteFile(filename, data, 0644)
 }
 
-// ToJSON returns the graph as JSON bytes.
+// ToJSON returns the graph as JSON bytes in BloodHound OpenGraph format.
 func (g *OpenGraph) ToJSON() ([]byte, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -116,9 +136,47 @@ func (g *OpenGraph) ToJSON() ([]byte, error) {
 	}
 
 	output := openGraphOutput{
-		Data:  nodes,
-		Edges: g.edges,
+		Graph: openGraphData{
+			Nodes: nodes,
+			Edges: g.edges,
+		},
+	}
+
+	if g.SourceKind != "" {
+		output.Metadata = &openGraphMetadata{
+			SourceKind: g.SourceKind,
+		}
 	}
 
 	return json.MarshalIndent(output, "", "  ")
+}
+
+// GetNodesAndEdges returns copies of all nodes and edges for checkpointing.
+func (g *OpenGraph) GetNodesAndEdges() ([]*Node, []*Edge) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	nodes := make([]*Node, 0, len(g.nodes))
+	for _, node := range g.nodes {
+		nodes = append(nodes, node)
+	}
+
+	edges := make([]*Edge, len(g.edges))
+	copy(edges, g.edges)
+
+	return nodes, edges
+}
+
+// RestoreNodesAndEdges restores nodes and edges from a checkpoint.
+func (g *OpenGraph) RestoreNodesAndEdges(nodes []*Node, edges []*Edge) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.nodes = make(map[string]*Node, len(nodes))
+	for _, node := range nodes {
+		g.nodes[node.ID] = node
+	}
+
+	g.edges = make([]*Edge, len(edges))
+	copy(g.edges, edges)
 }
