@@ -91,7 +91,7 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Debug mode")
 	rootCmd.Flags().BoolVar(&noColors, "no-colors", false, "Disable ANSI escape codes")
 	rootCmd.Flags().StringVar(&logfile, "logfile", "", "Log file to write to")
-	rootCmd.Flags().StringVarP(&output, "output", "o", "opengraph.json", "Output file to write to")
+	rootCmd.Flags().StringVarP(&output, "output", "o", "opengraph.json.gz", "Output file (use .gz extension for compression)")
 
 	// Advanced configuration
 	rootCmd.Flags().StringVar(&advertisedName, "advertised-name", "", "Advertised name of the client")

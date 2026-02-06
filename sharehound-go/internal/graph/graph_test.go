@@ -1,7 +1,10 @@
 package graph
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -216,5 +219,91 @@ func TestOpenGraphOutputFormat(t *testing.T) {
 	}
 	if _, ok := startObj["id"]; !ok {
 		t.Error("Edge start missing 'id' field")
+	}
+}
+
+func TestExportToFileGzip(t *testing.T) {
+	og := NewOpenGraph("ShareHound")
+
+	// Add some test data
+	for i := 0; i < 100; i++ {
+		node := NewNode("node"+string(rune('0'+i%10)), "TestType")
+		node.SetProperty("index", i)
+		og.AddNode(node)
+	}
+
+	for i := 0; i < 50; i++ {
+		edge := NewEdge("node"+string(rune('0'+i%10)), "node"+string(rune('0'+(i+1)%10)), "TestEdge")
+		og.AddEdge(edge)
+	}
+
+	// Create temp directory for test files
+	tmpDir := t.TempDir()
+
+	// Test regular JSON export
+	jsonFile := filepath.Join(tmpDir, "test.json")
+	if err := og.ExportToFile(jsonFile, true); err != nil {
+		t.Fatalf("Failed to export to JSON: %v", err)
+	}
+
+	// Test gzip export
+	gzFile := filepath.Join(tmpDir, "test.json.gz")
+	if err := og.ExportToFile(gzFile, true); err != nil {
+		t.Fatalf("Failed to export to gzip: %v", err)
+	}
+
+	// Verify JSON file is valid
+	jsonData, err := os.ReadFile(jsonFile)
+	if err != nil {
+		t.Fatalf("Failed to read JSON file: %v", err)
+	}
+	var jsonOutput map[string]interface{}
+	if err := json.Unmarshal(jsonData, &jsonOutput); err != nil {
+		t.Fatalf("JSON file is not valid JSON: %v", err)
+	}
+
+	// Verify gzip file can be decompressed and is valid JSON
+	gzFileHandle, err := os.Open(gzFile)
+	if err != nil {
+		t.Fatalf("Failed to open gzip file: %v", err)
+	}
+	defer gzFileHandle.Close()
+
+	gzReader, err := gzip.NewReader(gzFileHandle)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	defer gzReader.Close()
+
+	var gzOutput map[string]interface{}
+	decoder := json.NewDecoder(gzReader)
+	if err := decoder.Decode(&gzOutput); err != nil {
+		t.Fatalf("Gzip file content is not valid JSON: %v", err)
+	}
+
+	// Verify both outputs have the same structure
+	jsonGraph := jsonOutput["graph"].(map[string]interface{})
+	gzGraph := gzOutput["graph"].(map[string]interface{})
+
+	jsonNodes := jsonGraph["nodes"].([]interface{})
+	gzNodes := gzGraph["nodes"].([]interface{})
+	if len(jsonNodes) != len(gzNodes) {
+		t.Errorf("Node count mismatch: JSON=%d, Gzip=%d", len(jsonNodes), len(gzNodes))
+	}
+
+	jsonEdges := jsonGraph["edges"].([]interface{})
+	gzEdges := gzGraph["edges"].([]interface{})
+	if len(jsonEdges) != len(gzEdges) {
+		t.Errorf("Edge count mismatch: JSON=%d, Gzip=%d", len(jsonEdges), len(gzEdges))
+	}
+
+	// Verify gzip file is smaller
+	jsonStat, _ := os.Stat(jsonFile)
+	gzStat, _ := os.Stat(gzFile)
+	t.Logf("JSON size: %d bytes, Gzip size: %d bytes (%.1f%% compression)",
+		jsonStat.Size(), gzStat.Size(), float64(gzStat.Size())/float64(jsonStat.Size())*100)
+
+	if gzStat.Size() >= jsonStat.Size() {
+		t.Log("Warning: Gzip file is not smaller than JSON (may be expected for small files)")
 	}
 }
