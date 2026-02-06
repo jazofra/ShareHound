@@ -278,6 +278,9 @@ func (s *SMBSession) ListContents(dirPath string) (map[string]FileInfo, error) {
 }
 
 // GetFileSecurityDescriptor gets the NTFS security descriptor for a file or directory.
+// Note: The go-smb2 library doesn't support SMB2 QUERY_INFO for security descriptors.
+// This function attempts to verify file access but cannot retrieve NTFS ACLs.
+// Share-level permissions are still collected via SRVSVC RPC.
 func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescriptor, error) {
 	if s.share == nil {
 		return nil, ErrShareNotSet
@@ -289,17 +292,22 @@ func (s *SMBSession) GetFileSecurityDescriptor(filePath string) (*SecurityDescri
 		fullPath = "."
 	}
 
-	// Try to open the file/directory
+	// Try to open the file/directory to verify access
 	f, err := s.share.Open(fullPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open '%s': %w", fullPath, err)
+		// File not accessible - silently return nil
+		return nil, nil
 	}
 	defer f.Close()
 
-	// Note: go-smb2 doesn't directly expose security descriptor queries
-	// We need to use SRVSVC for share-level or extend the library for file-level
-	// Return a specific error to trigger fallback handling
-	return nil, ErrSecurityDescriptorNotSupported
+	// The go-smb2 library doesn't expose SMB2 QUERY_INFO security requests.
+	// To fully support NTFS security descriptors, we would need to either:
+	// 1. Fork go-smb2 to add security descriptor query support
+	// 2. Implement raw SMB2 protocol handling
+	// 3. Use a different SMB library that supports this functionality
+	//
+	// For now, return nil - share-level permissions are still collected via SRVSVC.
+	return nil, nil
 }
 
 // GetShareSecurityDescriptor gets the share-level security descriptor via SRVSVC RPC.
