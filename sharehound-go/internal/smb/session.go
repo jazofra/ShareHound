@@ -276,6 +276,10 @@ func (s *SMBSession) ListContents(dirPath string) (map[string]FileInfo, error) {
 			Size:         info.Size(),
 			ModifiedTime: info.ModTime(),
 		}
+		// Try to get creation time from underlying FileStat
+		if fileStat, ok := info.(*smb2.FileStat); ok {
+			fi.CreatedTime = fileStat.CreationTime
+		}
 		contents[info.Name()] = fi
 	}
 

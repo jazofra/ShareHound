@@ -108,7 +108,7 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 
 	// Share exploration
 	rootCmd.Flags().StringVar(&shareName, "share", "", "Share to enumerate (default: all shares)")
-	rootCmd.Flags().IntVar(&depth, "depth", 3, "Maximum depth to traverse directories")
+	rootCmd.Flags().IntVar(&depth, "depth", 0, "Maximum depth to traverse directories (0 = unlimited)")
 	rootCmd.Flags().BoolVar(&includeCommonShares, "include-common-shares", false, "Include C$, ADMIN$, IPC$, PRINT$")
 
 	// Targets and authentication
