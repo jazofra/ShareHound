@@ -9,10 +9,12 @@ This is a complete port with **full feature parity** with the Python version, pr
 - Enumerate SMB shares and their permissions across network hosts
 - Support for both share-level and NTFS-level access rights
 - BloodHound OpenGraph JSON output format
+- **ZIP compression** for large outputs (handles millions of edges)
 - ShareQL rule engine for filtering what gets explored/processed
 - Multithreaded processing with connection pooling
 - NTLM, Kerberos, and pass-the-hash authentication
 - CIDR range and target file support
+- **Resumable scans** with checkpoint support
 - Cross-platform builds (Linux, Windows, macOS)
 
 ## Installation
@@ -54,14 +56,25 @@ Download from the [Releases](https://github.com/specterops/sharehound/releases) 
     --auth-user administrator \
     --auth-hashes 'aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0'
 
-# Scan a CIDR range with targets file
+# Scan a CIDR range with targets file (ZIP compressed output)
 ./sharehound --target 192.168.1.0/24 \
     --targets-file additional_hosts.txt \
     --auth-domain CORP \
     --auth-dc-ip 192.168.1.1 \
     --auth-user administrator \
     --auth-password 'P@ssw0rd' \
-    --output results.json
+    --output results.zip
+
+# With checkpoint for resumable scans
+./sharehound --target 192.168.1.0/24 \
+    --auth-domain CORP \
+    --auth-dc-ip 192.168.1.1 \
+    --auth-user administrator \
+    --auth-password 'P@ssw0rd' \
+    --checkpoint scan.checkpoint
+
+# Resume an interrupted scan
+./sharehound --checkpoint scan.checkpoint --resume
 
 # With Kerberos authentication
 ./sharehound --target dc01.corp.local \
@@ -105,7 +118,7 @@ Download from the [Releases](https://github.com/specterops/sharehound/releases) 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--share` | Specific share to enumerate (default: all shares) | all |
-| `--depth` | Maximum depth to traverse directories | 3 |
+| `--depth` | Maximum depth to traverse directories (0 = unlimited) | 0 |
 | `--include-common-shares` | Include C$, ADMIN$, IPC$, PRINT$ | false |
 
 ### Performance
@@ -120,11 +133,18 @@ Download from the [Releases](https://github.com/specterops/sharehound/releases) 
 ### Output
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-o, --output` | Output file path | opengraph.json |
+| `-o, --output` | Output file path (use .zip for compression) | opengraph.zip |
 | `--logfile` | Log file to write to | - |
 | `-v, --verbose` | Verbose mode | false |
 | `--debug` | Debug mode | false |
 | `--no-colors` | Disable ANSI escape codes | false |
+
+### Checkpoint/Resume
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--checkpoint` | Checkpoint file for resumable scans | - |
+| `--checkpoint-interval` | Checkpoint save interval in seconds | 60 |
+| `--resume` | Resume from existing checkpoint file | false |
 
 ### Rules
 | Flag | Description |
@@ -141,6 +161,18 @@ Download from the [Releases](https://github.com/specterops/sharehound/releases) 
 ## Output Format
 
 The output is a BloodHound OpenGraph JSON file that can be imported into BloodHound Enterprise or Community Edition.
+
+### ZIP Compression
+
+By default, output is compressed as a ZIP archive (`opengraph.zip`) containing the JSON file. This provides:
+- **~90% size reduction** for large scans
+- **Streaming export** - handles millions of edges without memory issues
+- Compatible with BloodHound's ZIP import
+
+To output uncompressed JSON, use a `.json` extension:
+```bash
+./sharehound --target ... -o output.json
+```
 
 ### Node Types (9 total)
 
@@ -358,9 +390,40 @@ make fmt
 make clean
 ```
 
+## Testing
+
+### Unit Tests
+
+```bash
+go test ./...
+```
+
+### Integration Tests
+
+Integration tests require a real SMB server. Set environment variables and run:
+
+```bash
+export SMB_TEST_HOST="192.168.1.100"
+export SMB_TEST_USER="testuser"
+export SMB_TEST_PASSWORD="password"
+export SMB_TEST_DOMAIN="DOMAIN"        # optional
+export SMB_TEST_SHARE="sharename"      # optional
+
+go test -v ./internal/smb -run TestIntegration
+```
+
+Available integration tests:
+- `TestIntegrationConnect` - Basic SMB connection
+- `TestIntegrationListShares` - Share enumeration
+- `TestIntegrationListContents` - Directory listing with timestamps
+- `TestIntegrationSecurityDescriptor` - NTFS permission retrieval
+- `TestIntegrationDirectoryTraversal` - Recursive traversal
+- `TestIntegrationShareSecurityDescriptor` - SRVSVC RPC
+
 ## Dependencies
 
-- [go-smb2](https://github.com/hirochachacha/go-smb2) - SMB2/3 client
+- [go-smb2](https://github.com/medianexapp/go-smb2) - SMB2/3 client (fork with NTFS security descriptor support)
+- [go-ldap](https://github.com/go-ldap/ldap) - LDAP client for AD integration
 - [miekg/dns](https://github.com/miekg/dns) - DNS resolution
 - [cobra](https://github.com/spf13/cobra) - CLI framework
 - [progressbar](https://github.com/schollz/progressbar) - Progress display

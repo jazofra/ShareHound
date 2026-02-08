@@ -89,22 +89,22 @@ func TestEdgeMarshalJSON(t *testing.T) {
 		t.Fatalf("Failed to parse marshaled JSON: %v", err)
 	}
 
-	// Verify "start" is an object with "id" (BloodHound schema)
+	// Verify "start" is an object with "value" (BloodHound schema)
 	start, ok := parsed["start"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("Expected 'start' to be an object, got %T", parsed["start"])
 	}
-	if start["id"].(string) != "node1" {
-		t.Errorf("Expected start.id='node1', got %v", start["id"])
+	if start["value"].(string) != "node1" {
+		t.Errorf("Expected start.value='node1', got %v", start["value"])
 	}
 
-	// Verify "end" is an object with "id"
+	// Verify "end" is an object with "value"
 	end, ok := parsed["end"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("Expected 'end' to be an object, got %T", parsed["end"])
 	}
-	if end["id"].(string) != "node2" {
-		t.Errorf("Expected end.id='node2', got %v", end["id"])
+	if end["value"].(string) != "node2" {
+		t.Errorf("Expected end.value='node2', got %v", end["value"])
 	}
 
 	// Verify "kind"
@@ -114,33 +114,46 @@ func TestEdgeMarshalJSON(t *testing.T) {
 }
 
 func TestEdgeUnmarshalJSON(t *testing.T) {
-	// Test with object format (BloodHound schema)
-	jsonEdge := `{"start":{"id":"a"},"end":{"id":"b"},"kind":"Related","properties":{"weight":5}}`
+	// Test with object format (BloodHound schema using "value")
+	jsonEdge := `{"start":{"value":"a"},"end":{"value":"b"},"kind":"Related","properties":{"weight":5}}`
 	var edge1 Edge
 	if err := json.Unmarshal([]byte(jsonEdge), &edge1); err != nil {
 		t.Fatalf("Failed to unmarshal edge: %v", err)
 	}
-	if edge1.Start.ID != "a" {
-		t.Errorf("Expected start.id='a', got %s", edge1.Start.ID)
+	if edge1.Start.Value != "a" {
+		t.Errorf("Expected start.value='a', got %s", edge1.Start.Value)
 	}
-	if edge1.End.ID != "b" {
-		t.Errorf("Expected end.id='b', got %s", edge1.End.ID)
+	if edge1.End.Value != "b" {
+		t.Errorf("Expected end.value='b', got %s", edge1.End.Value)
 	}
 	if edge1.Kind != "Related" {
 		t.Errorf("Expected kind='Related', got %s", edge1.Kind)
 	}
 
-	// Test with string format (legacy/backward compatibility)
-	jsonLegacy := `{"start":"x","end":"y","kind":"Connected"}`
+	// Test with legacy object format (using "id")
+	jsonLegacyObj := `{"start":{"id":"m"},"end":{"id":"n"},"kind":"LegacyRelated"}`
 	var edge2 Edge
-	if err := json.Unmarshal([]byte(jsonLegacy), &edge2); err != nil {
+	if err := json.Unmarshal([]byte(jsonLegacyObj), &edge2); err != nil {
 		t.Fatalf("Failed to unmarshal legacy edge: %v", err)
 	}
-	if edge2.Start.ID != "x" {
-		t.Errorf("Expected start.id='x', got %s", edge2.Start.ID)
+	if edge2.Start.Value != "m" {
+		t.Errorf("Expected start.value='m', got %s", edge2.Start.Value)
 	}
-	if edge2.End.ID != "y" {
-		t.Errorf("Expected end.id='y', got %s", edge2.End.ID)
+	if edge2.End.Value != "n" {
+		t.Errorf("Expected end.value='n', got %s", edge2.End.Value)
+	}
+
+	// Test with string format (legacy/backward compatibility)
+	jsonLegacy := `{"start":"x","end":"y","kind":"Connected"}`
+	var edge3 Edge
+	if err := json.Unmarshal([]byte(jsonLegacy), &edge3); err != nil {
+		t.Fatalf("Failed to unmarshal legacy edge: %v", err)
+	}
+	if edge3.Start.Value != "x" {
+		t.Errorf("Expected start.value='x', got %s", edge3.Start.Value)
+	}
+	if edge3.End.Value != "y" {
+		t.Errorf("Expected end.value='y', got %s", edge3.End.Value)
 	}
 }
 
@@ -211,14 +224,21 @@ func TestOpenGraphOutputFormat(t *testing.T) {
 		t.Error("Node missing 'kinds' field")
 	}
 
-	// 6. Verify edge structure in output
+	// 6. Verify edge structure in output (BloodHound schema requires "value")
 	edgeOut := edges[0].(map[string]interface{})
 	startObj, ok := edgeOut["start"].(map[string]interface{})
 	if !ok {
 		t.Fatal("Edge 'start' should be an object")
 	}
-	if _, ok := startObj["id"]; !ok {
-		t.Error("Edge start missing 'id' field")
+	if _, ok := startObj["value"]; !ok {
+		t.Error("Edge start missing 'value' field")
+	}
+	endObj, ok := edgeOut["end"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Edge 'end' should be an object")
+	}
+	if _, ok := endObj["value"]; !ok {
+		t.Error("Edge end missing 'value' field")
 	}
 }
 
