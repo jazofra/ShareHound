@@ -6,9 +6,9 @@ import (
 )
 
 // EdgeEndpoint represents a node reference in an edge.
+// Per BloodHound schema, uses "value" for the matching value.
 type EdgeEndpoint struct {
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name,omitempty"`
+	Value   string `json:"value,omitempty"`
 	MatchBy string `json:"match_by,omitempty"`
 	Kind    string `json:"kind,omitempty"`
 }
@@ -24,8 +24,8 @@ type Edge struct {
 // NewEdge creates a new edge with the given parameters.
 func NewEdge(startNodeID, endNodeID, kind string) *Edge {
 	return &Edge{
-		Start:      EdgeEndpoint{ID: startNodeID},
-		End:        EdgeEndpoint{ID: endNodeID},
+		Start:      EdgeEndpoint{Value: startNodeID},
+		End:        EdgeEndpoint{Value: endNodeID},
 		Kind:       kind,
 		Properties: make(map[string]interface{}),
 	}
@@ -34,8 +34,8 @@ func NewEdge(startNodeID, endNodeID, kind string) *Edge {
 // NewEdgeByName creates a new edge matching nodes by name.
 func NewEdgeByName(startName, endName, kind string) *Edge {
 	return &Edge{
-		Start:      EdgeEndpoint{Name: startName, MatchBy: "name"},
-		End:        EdgeEndpoint{Name: endName, MatchBy: "name"},
+		Start:      EdgeEndpoint{Value: startName, MatchBy: "name"},
+		End:        EdgeEndpoint{Value: endName, MatchBy: "name"},
 		Kind:       kind,
 		Properties: make(map[string]interface{}),
 	}
@@ -74,33 +74,24 @@ func (e *Edge) SetProperty(key string, value interface{}) *Edge {
 	return e
 }
 
-// StartNode returns the start node ID for backward compatibility.
+// StartNode returns the start node value for backward compatibility.
 func (e *Edge) StartNode() string {
-	if e.Start.ID != "" {
-		return e.Start.ID
-	}
-	return e.Start.Name
+	return e.Start.Value
 }
 
-// EndNode returns the end node ID for backward compatibility.
+// EndNode returns the end node value for backward compatibility.
 func (e *Edge) EndNode() string {
-	if e.End.ID != "" {
-		return e.End.ID
-	}
-	return e.End.Name
+	return e.End.Value
 }
 
 // MarshalJSON implements custom JSON marshaling for Edge.
 func (e *Edge) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
-	// Build start endpoint
+	// Build start endpoint (BloodHound schema requires "value")
 	startObj := make(map[string]interface{})
-	if e.Start.ID != "" {
-		startObj["id"] = e.Start.ID
-	}
-	if e.Start.Name != "" {
-		startObj["name"] = e.Start.Name
+	if e.Start.Value != "" {
+		startObj["value"] = e.Start.Value
 	}
 	if e.Start.MatchBy != "" {
 		startObj["match_by"] = e.Start.MatchBy
@@ -110,13 +101,10 @@ func (e *Edge) MarshalJSON() ([]byte, error) {
 	}
 	m["start"] = startObj
 
-	// Build end endpoint
+	// Build end endpoint (BloodHound schema requires "value")
 	endObj := make(map[string]interface{})
-	if e.End.ID != "" {
-		endObj["id"] = e.End.ID
-	}
-	if e.End.Name != "" {
-		endObj["name"] = e.End.Name
+	if e.End.Value != "" {
+		endObj["value"] = e.End.Value
 	}
 	if e.End.MatchBy != "" {
 		endObj["match_by"] = e.End.MatchBy
@@ -165,6 +153,7 @@ func (e *Edge) UnmarshalJSON(data []byte) error {
 }
 
 // parseEndpoint parses an endpoint that can be a string or object.
+// Supports both BloodHound schema ("value") and legacy formats ("id", "name").
 func parseEndpoint(data json.RawMessage, ep *EdgeEndpoint) error {
 	if len(data) == 0 {
 		return nil
@@ -173,15 +162,32 @@ func parseEndpoint(data json.RawMessage, ep *EdgeEndpoint) error {
 	// Try as string first (backward compatibility)
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
-		ep.ID = str
+		ep.Value = str
 		return nil
 	}
 
-	// Try as object
-	var obj EdgeEndpoint
+	// Try as object - support both "value" and legacy "id"/"name" fields
+	var obj struct {
+		Value   string `json:"value,omitempty"`
+		ID      string `json:"id,omitempty"`
+		Name    string `json:"name,omitempty"`
+		MatchBy string `json:"match_by,omitempty"`
+		Kind    string `json:"kind,omitempty"`
+	}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	*ep = obj
+
+	// Use "value" if present, otherwise fall back to "id" or "name" for legacy support
+	if obj.Value != "" {
+		ep.Value = obj.Value
+	} else if obj.ID != "" {
+		ep.Value = obj.ID
+	} else if obj.Name != "" {
+		ep.Value = obj.Name
+	}
+	ep.MatchBy = obj.MatchBy
+	ep.Kind = obj.Kind
+
 	return nil
 }
