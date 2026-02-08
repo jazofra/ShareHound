@@ -1,4 +1,6 @@
 // ShareHound - A tool to map network share access rights into BloodHound OpenGraph format.
+// Original Python version by Remi Gascou (@podalirius_) @ SpecterOps
+// Go port by Javier Azofra @ Siemens Healthineers
 package main
 
 import (
@@ -27,7 +29,7 @@ import (
 )
 
 // Version information
-const Version = "1.0.0"
+const Version = "2.0.0-go"
 
 // CLI flags
 var (
@@ -137,7 +139,7 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 }
 
 func run(cmd *cobra.Command, args []string) {
-	fmt.Printf("ShareHound v%s - by Remi Gascou (@podalirius_) @ SpecterOps\n\n", Version)
+	fmt.Printf("ShareHound v%s - Original by Remi Gascou (@podalirius_) @ SpecterOps, Go port by Javier Azofra @ Siemens Healthineers\n\n", Version)
 
 	// Validate arguments
 	if targetsFile == "" && len(targetsList) == 0 && authUser == "" {
