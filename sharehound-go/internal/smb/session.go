@@ -452,54 +452,40 @@ func (s *SMBSession) GetShareSecurityDescriptor(shareName string) ([]byte, error
 
 // GetShareRootSecurityDescriptor gets the NTFS security descriptor of the share root.
 // This is used as a fallback when SRVSVC is not available.
+// It uses QuerySecurityDescriptorLinked (medianexapp/go-smb2 fork) to query the
+// root directory's security descriptor, matching the Python implementation's fallback.
 func (s *SMBSession) GetShareRootSecurityDescriptor(shareName string) ([]byte, error) {
 	s.mu.Lock()
 	if !s.connected || s.session == nil {
 		s.mu.Unlock()
 		return nil, ErrNotConnected
 	}
+	session := s.session
 	s.mu.Unlock()
 
-	// Save current share
-	originalShare := s.currentShare
-
-	// Connect to target share
-	if err := s.SetShare(shareName); err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		// Restore original share if any
-		if originalShare != "" {
-			s.SetShare(originalShare)
-		}
-	}()
-
-	s.mu.Lock()
-	share := s.share
-	s.mu.Unlock()
-
-	if share == nil {
-		return nil, ErrShareNotSet
-	}
-
-	// Try to open root and verify access
-	f, err := share.Open(".")
+	// Mount the target share directly (don't use SetShare to avoid disrupting
+	// the current share state used by other operations)
+	share, err := session.Mount(shareName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open share root: %w", err)
+		return nil, fmt.Errorf("failed to mount share '%s': %w", shareName, err)
 	}
-	defer f.Close()
+	defer share.Umount()
 
-	// Get file stat to verify we have access
-	_, err = f.Stat()
+	// Use QuerySecurityDescriptorLinked to get the root directory's security descriptor.
+	// This is the same method used by GetFileSecurityDescriptor for files/directories,
+	// applied to the root path "." of the share.
+	sdBytes, err := QuerySecurityDescriptorLinked(share, ".")
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat share root: %w", err)
+		return nil, fmt.Errorf("failed to query root security descriptor for share '%s': %w", shareName, err)
 	}
 
-	// go-smb2 doesn't expose security descriptor queries
-	// Log that we have access but can't get SD
-	s.log.Debug(fmt.Sprintf("Share root '%s' accessible but SD query not supported", shareName))
-	return nil, ErrSecurityDescriptorNotSupported
+	if len(sdBytes) == 0 {
+		s.log.Debug(fmt.Sprintf("Share root '%s' accessible but security descriptor is empty", shareName))
+		return nil, nil
+	}
+
+	s.log.Debug(fmt.Sprintf("Successfully retrieved root security descriptor for share '%s' (%d bytes)", shareName, len(sdBytes)))
+	return sdBytes, nil
 }
 
 // GetSession returns the underlying SMB2 session.

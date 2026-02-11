@@ -353,13 +353,15 @@ func processShare(
 	// Create OpenGraph context
 	ogc := graph.NewOpenGraphContext(og, taskLog)
 
-	// Create host node
-	hostNode := graph.NewNode(host, kinds.NodeKindNetworkShareHost).
-		SetProperty("name", host)
+	// Create host node — use remoteName (server name/FQDN) for the node ID and name,
+	// not the resolved IP, to match Python behavior and ensure consistency with
+	// file/directory UNC paths (which use smbSession.GetRemoteName()).
+	hostNode := graph.NewNode(remoteName, kinds.NodeKindNetworkShareHost).
+		SetProperty("name", remoteName)
 	ogc.SetHost(hostNode)
 
-	// Create share node
-	shareID := fmt.Sprintf("\\\\%s\\%s\\", host, shareName)
+	// Create share node — use remoteName for UNC path consistency
+	shareID := fmt.Sprintf("\\\\%s\\%s\\", remoteName, shareName)
 	shareNode := graph.NewNode(shareID, kinds.NodeKindNetworkShareSMB).
 		SetProperty("displayName", shareName).
 		SetProperty("description", shareInfo.Comment).
