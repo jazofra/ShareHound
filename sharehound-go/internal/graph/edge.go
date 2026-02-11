@@ -24,20 +24,18 @@ type Edge struct {
 // NewEdge creates a new edge with the given parameters.
 func NewEdge(startNodeID, endNodeID, kind string) *Edge {
 	return &Edge{
-		Start:      EdgeEndpoint{Value: startNodeID},
-		End:        EdgeEndpoint{Value: endNodeID},
-		Kind:       kind,
-		Properties: make(map[string]interface{}),
+		Start: EdgeEndpoint{Value: startNodeID},
+		End:   EdgeEndpoint{Value: endNodeID},
+		Kind:  kind,
 	}
 }
 
 // NewEdgeByName creates a new edge matching nodes by name.
 func NewEdgeByName(startName, endName, kind string) *Edge {
 	return &Edge{
-		Start:      EdgeEndpoint{Value: startName, MatchBy: "name"},
-		End:        EdgeEndpoint{Value: endName, MatchBy: "name"},
-		Kind:       kind,
-		Properties: make(map[string]interface{}),
+		Start: EdgeEndpoint{Value: startName, MatchBy: "name"},
+		End:   EdgeEndpoint{Value: endName, MatchBy: "name"},
+		Kind:  kind,
 	}
 }
 

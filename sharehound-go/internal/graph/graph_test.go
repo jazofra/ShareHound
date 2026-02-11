@@ -158,7 +158,11 @@ func TestEdgeUnmarshalJSON(t *testing.T) {
 }
 
 func TestOpenGraphOutputFormat(t *testing.T) {
-	og := NewOpenGraph("ShareHound")
+	og, err := NewOpenGraph("ShareHound")
+	if err != nil {
+		t.Fatalf("Failed to create graph: %v", err)
+	}
+	defer og.Close()
 
 	node1 := NewNode("share1", "NetworkShare")
 	node1.SetProperty("name", "DataShare")
@@ -243,7 +247,11 @@ func TestOpenGraphOutputFormat(t *testing.T) {
 }
 
 func TestExportToFileZip(t *testing.T) {
-	og := NewOpenGraph("ShareHound")
+	og, err := NewOpenGraph("ShareHound")
+	if err != nil {
+		t.Fatalf("Failed to create graph: %v", err)
+	}
+	defer og.Close()
 
 	// Add some test data
 	for i := 0; i < 100; i++ {

@@ -15,9 +15,8 @@ type Node struct {
 // NewNode creates a new node with the given ID and kinds.
 func NewNode(id string, kinds ...string) *Node {
 	return &Node{
-		ID:         id,
-		Kinds:      kinds,
-		Properties: make(map[string]interface{}),
+		ID:    id,
+		Kinds: kinds,
 	}
 }
 

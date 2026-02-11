@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,72 +14,162 @@ import (
 )
 
 // OpenGraph represents a BloodHound OpenGraph structure.
+//
+// Nodes and edges are stored on disk in temporary NDJSON files so that
+// memory usage stays bounded regardless of graph size.  Only the set of
+// node-ID strings is kept in memory for deduplication.
 type OpenGraph struct {
 	SourceKind string
-	nodes      map[string]*Node
-	edges      []*Edge
-	mu         sync.RWMutex
+
+	// In-memory dedup – only ID strings, not full objects.
+	nodeIDs   map[string]struct{}
+	edgeCount int
+
+	// Disk-backed storage (NDJSON temp files).
+	nodeFile *os.File
+	edgeFile *os.File
+	nodeBuf  *bufio.Writer
+	edgeBuf  *bufio.Writer
+
+	mu sync.Mutex
 }
 
-// NewOpenGraph creates a new OpenGraph instance.
-func NewOpenGraph(sourceKind string) *OpenGraph {
+// NewOpenGraph creates a new OpenGraph instance with disk-backed storage.
+// The caller must call Close() when done to release temporary files.
+func NewOpenGraph(sourceKind string) (*OpenGraph, error) {
+	nf, err := os.CreateTemp("", "sharehound-nodes-*.ndjson")
+	if err != nil {
+		return nil, fmt.Errorf("create node temp file: %w", err)
+	}
+	ef, err := os.CreateTemp("", "sharehound-edges-*.ndjson")
+	if err != nil {
+		nf.Close()
+		os.Remove(nf.Name())
+		return nil, fmt.Errorf("create edge temp file: %w", err)
+	}
+
 	return &OpenGraph{
 		SourceKind: sourceKind,
-		nodes:      make(map[string]*Node),
-		edges:      make([]*Edge, 0),
-	}
+		nodeIDs:    make(map[string]struct{}),
+		nodeFile:   nf,
+		edgeFile:   ef,
+		nodeBuf:    bufio.NewWriterSize(nf, 256*1024),
+		edgeBuf:    bufio.NewWriterSize(ef, 256*1024),
+	}, nil
 }
 
-// AddNode adds a node to the graph if it doesn't exist.
+// Close releases resources and removes temporary files.
+func (g *OpenGraph) Close() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var firstErr error
+	for _, f := range []*os.File{g.nodeFile, g.edgeFile} {
+		if f != nil {
+			name := f.Name()
+			f.Close()
+			if err := os.Remove(name); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	g.nodeIDs = nil
+	return firstErr
+}
+
+// appendJSON marshals v as JSON and writes it as a single line to w.
+func appendJSON(w *bufio.Writer, v interface{}) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return // best-effort
+	}
+	w.Write(data)     //nolint:errcheck
+	w.WriteByte('\n') //nolint:errcheck
+}
+
+// ---------- Mutators --------------------------------------------------
+
+// AddNode adds a node to the graph if it doesn't already exist.
 func (g *OpenGraph) AddNode(node *Node) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if _, exists := g.nodes[node.ID]; !exists {
-		g.nodes[node.ID] = node
+	if _, exists := g.nodeIDs[node.ID]; exists {
+		return
 	}
+	g.nodeIDs[node.ID] = struct{}{}
+	appendJSON(g.nodeBuf, node)
 }
 
-// AddNodeWithoutValidation adds a node without checking for duplicates.
+// AddNodeWithoutValidation adds a node, deduplicating by ID.
+// With disk-backed storage this behaves identically to AddNode because
+// on-disk objects cannot be updated in place.
 func (g *OpenGraph) AddNodeWithoutValidation(node *Node) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.nodes[node.ID] = node
+	g.AddNode(node)
 }
 
-// AddEdge adds an edge to the graph.
+// AddEdge appends an edge to the on-disk store.
+// Callers are expected to avoid creating duplicate edges at the source
+// (see OpenGraphContext.emittedPathNodes).
 func (g *OpenGraph) AddEdge(edge *Edge) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.edges = append(g.edges, edge)
+	appendJSON(g.edgeBuf, edge)
+	g.edgeCount++
 }
 
-// AddEdgeWithoutValidation adds an edge without validation.
+// AddEdgeWithoutValidation appends an edge without additional checks.
 func (g *OpenGraph) AddEdgeWithoutValidation(edge *Edge) {
 	g.AddEdge(edge)
 }
 
-// GetNode returns a node by ID.
+// ---------- Accessors -------------------------------------------------
+
+// GetNode looks up a node by ID.  This requires a linear scan of the
+// temp file and should only be used for rare/diagnostic lookups.
 func (g *OpenGraph) GetNode(id string) (*Node, bool) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	node, ok := g.nodes[id]
-	return node, ok
+	g.mu.Lock()
+	if _, exists := g.nodeIDs[id]; !exists {
+		g.mu.Unlock()
+		return nil, false
+	}
+	g.nodeBuf.Flush() //nolint:errcheck
+	name := g.nodeFile.Name()
+	g.mu.Unlock()
+
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(bufio.NewReader(f))
+	for {
+		var node Node
+		if err := dec.Decode(&node); err != nil {
+			return nil, false
+		}
+		if node.ID == id {
+			return &node, true
+		}
+	}
 }
 
-// GetNodeCount returns the number of nodes.
+// GetNodeCount returns the number of unique nodes.
 func (g *OpenGraph) GetNodeCount() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return len(g.nodes)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.nodeIDs)
 }
 
 // GetEdgeCount returns the number of edges.
 func (g *OpenGraph) GetEdgeCount() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return len(g.edges)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.edgeCount
 }
+
+// ---------- Serialisation helpers -------------------------------------
 
 // openGraphData represents the graph portion of the output.
 type openGraphData struct {
@@ -98,52 +189,53 @@ type openGraphOutput struct {
 }
 
 // ProgressFunc is a callback for export progress reporting.
-// phase is a description (e.g. "Serializing nodes"), current/total are item counts.
 type ProgressFunc func(phase string, current, total int)
 
-// ExportToFile exports the graph to a JSON file in BloodHound OpenGraph format.
-// If the filename ends with .zip, the output will be ZIP compressed.
-// Uses streaming to handle large graphs without loading everything in memory.
+// ---------- Export ----------------------------------------------------
+
+// ExportToFile exports the graph to a JSON file in BloodHound OpenGraph
+// format.  If the filename ends with .zip, the output will be ZIP
+// compressed.  Data is streamed from disk so peak memory stays low.
 func (g *OpenGraph) ExportToFile(filename string, includeMetadata bool) error {
 	return g.ExportToFileWithProgress(filename, includeMetadata, nil)
 }
 
 // ExportToFileWithProgress exports the graph with progress reporting.
 func (g *OpenGraph) ExportToFileWithProgress(filename string, includeMetadata bool, progress ProgressFunc) error {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+	// Flush buffers and snapshot counts while holding the lock.
+	g.mu.Lock()
+	g.nodeBuf.Flush() //nolint:errcheck
+	g.edgeBuf.Flush() //nolint:errcheck
+	nodeCount := len(g.nodeIDs)
+	edgeCount := g.edgeCount
+	nodeFileName := g.nodeFile.Name()
+	edgeFileName := g.edgeFile.Name()
+	g.mu.Unlock()
 
 	if progress != nil {
 		progress("Creating output file", 0, 0)
 	}
 
-	// Create output file
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	// Use buffered writer for better performance
-	bufWriter := bufio.NewWriterSize(file, 64*1024) // 64KB buffer
+	bufWriter := bufio.NewWriterSize(file, 64*1024)
 
-	// Determine if we should use ZIP compression
 	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
 		if progress != nil {
 			progress("Preparing ZIP archive", 0, 0)
 		}
-
-		// Create ZIP writer
 		zipWriter := zip.NewWriter(bufWriter)
 
-		// Create entry for JSON file (use base name without .zip)
 		baseName := filepath.Base(filename)
 		jsonName := strings.TrimSuffix(baseName, ".zip")
 		if !strings.HasSuffix(jsonName, ".json") {
 			jsonName += ".json"
 		}
 
-		// Create compressed entry with maximum compression
 		header := &zip.FileHeader{
 			Name:   jsonName,
 			Method: zip.Deflate,
@@ -153,22 +245,20 @@ func (g *OpenGraph) ExportToFileWithProgress(filename string, includeMetadata bo
 			return err
 		}
 
-		// Stream JSON to ZIP entry
-		if err := g.streamJSON(entryWriter, includeMetadata, progress); err != nil {
+		if err := streamJSON(entryWriter, g.SourceKind, includeMetadata, progress,
+			nodeFileName, edgeFileName, nodeCount, edgeCount); err != nil {
 			return err
 		}
 
 		if progress != nil {
 			progress("Finalizing ZIP archive", 0, 0)
 		}
-
-		// Close ZIP writer
 		if err := zipWriter.Close(); err != nil {
 			return err
 		}
 	} else {
-		// Regular JSON output
-		if err := g.streamJSON(bufWriter, includeMetadata, progress); err != nil {
+		if err := streamJSON(bufWriter, g.SourceKind, includeMetadata, progress,
+			nodeFileName, edgeFileName, nodeCount, edgeCount); err != nil {
 			return err
 		}
 	}
@@ -176,24 +266,23 @@ func (g *OpenGraph) ExportToFileWithProgress(filename string, includeMetadata bo
 	if progress != nil {
 		progress("Flushing to disk", 0, 0)
 	}
-
-	// Flush buffer
 	return bufWriter.Flush()
 }
 
-// streamJSON writes the graph as JSON to the writer in a streaming fashion.
-func (g *OpenGraph) streamJSON(w io.Writer, includeMetadata bool, progress ProgressFunc) error {
-	// Start the JSON object
+// streamJSON writes the graph as JSON by reading nodes and edges from
+// the NDJSON temp files.  Only one JSON object at a time is in memory.
+func streamJSON(w io.Writer, sourceKind string, includeMetadata bool, progress ProgressFunc,
+	nodeFileName, edgeFileName string, nodeCount, edgeCount int) error {
+
 	if _, err := w.Write([]byte("{\n")); err != nil {
 		return err
 	}
 
-	// Write metadata if requested
-	if includeMetadata && g.SourceKind != "" {
+	if includeMetadata && sourceKind != "" {
 		if _, err := w.Write([]byte(`  "metadata": {"source_kind": "`)); err != nil {
 			return err
 		}
-		if _, err := w.Write([]byte(g.SourceKind)); err != nil {
+		if _, err := w.Write([]byte(sourceKind)); err != nil {
 			return err
 		}
 		if _, err := w.Write([]byte("\"},\n")); err != nil {
@@ -201,137 +290,202 @@ func (g *OpenGraph) streamJSON(w io.Writer, includeMetadata bool, progress Progr
 		}
 	}
 
-	// Start graph object
 	if _, err := w.Write([]byte("  \"graph\": {\n")); err != nil {
 		return err
 	}
 
-	// Write nodes array - stream each node
+	// ---- nodes ----
 	if _, err := w.Write([]byte("    \"nodes\": [\n")); err != nil {
 		return err
 	}
 
-	nodeCount := 0
-	totalNodes := len(g.nodes)
-	// Report progress every N items to avoid excessive output
-	nodeReportInterval := progressInterval(totalNodes)
-
+	nodeReportInterval := progressInterval(nodeCount)
 	if progress != nil {
-		progress("Serializing nodes", 0, totalNodes)
+		progress("Serializing nodes", 0, nodeCount)
 	}
 
-	for _, node := range g.nodes {
-		nodeJSON, err := json.Marshal(node)
-		if err != nil {
-			return err
-		}
-
-		if _, err := w.Write([]byte("      ")); err != nil {
-			return err
-		}
-		if _, err := w.Write(nodeJSON); err != nil {
-			return err
-		}
-
-		nodeCount++
-		if nodeCount < totalNodes {
-			if _, err := w.Write([]byte(",\n")); err != nil {
-				return err
-			}
-		} else {
-			if _, err := w.Write([]byte("\n")); err != nil {
-				return err
-			}
-		}
-
-		if progress != nil && nodeCount%nodeReportInterval == 0 {
-			progress("Serializing nodes", nodeCount, totalNodes)
-		}
+	nf, err := os.Open(nodeFileName)
+	if err != nil {
+		return err
+	}
+	nIdx, err := streamArray(w, nf, nodeCount, nodeReportInterval, "Serializing nodes", progress)
+	nf.Close()
+	if err != nil {
+		return err
 	}
 
+	if nIdx > 0 {
+		if _, err := w.Write([]byte("\n")); err != nil {
+			return err
+		}
+	}
 	if progress != nil {
-		progress("Serializing nodes", totalNodes, totalNodes)
+		progress("Serializing nodes", nodeCount, nodeCount)
 	}
-
 	if _, err := w.Write([]byte("    ],\n")); err != nil {
 		return err
 	}
 
-	// Write edges array - stream each edge
+	// ---- edges ----
 	if _, err := w.Write([]byte("    \"edges\": [\n")); err != nil {
 		return err
 	}
 
-	totalEdges := len(g.edges)
-	edgeReportInterval := progressInterval(totalEdges)
-
+	edgeReportInterval := progressInterval(edgeCount)
 	if progress != nil {
-		progress("Serializing edges", 0, totalEdges)
+		progress("Serializing edges", 0, edgeCount)
 	}
 
-	for i, edge := range g.edges {
-		edgeJSON, err := json.Marshal(edge)
-		if err != nil {
-			return err
-		}
-
-		if _, err := w.Write([]byte("      ")); err != nil {
-			return err
-		}
-		if _, err := w.Write(edgeJSON); err != nil {
-			return err
-		}
-
-		if i < totalEdges-1 {
-			if _, err := w.Write([]byte(",\n")); err != nil {
-				return err
-			}
-		} else {
-			if _, err := w.Write([]byte("\n")); err != nil {
-				return err
-			}
-		}
-
-		if progress != nil && (i+1)%edgeReportInterval == 0 {
-			progress("Serializing edges", i+1, totalEdges)
-		}
+	ef, err := os.Open(edgeFileName)
+	if err != nil {
+		return err
+	}
+	eIdx, err := streamArray(w, ef, edgeCount, edgeReportInterval, "Serializing edges", progress)
+	ef.Close()
+	if err != nil {
+		return err
 	}
 
+	if eIdx > 0 {
+		if _, err := w.Write([]byte("\n")); err != nil {
+			return err
+		}
+	}
 	if progress != nil {
-		progress("Serializing edges", totalEdges, totalEdges)
+		progress("Serializing edges", edgeCount, edgeCount)
 	}
-
 	if _, err := w.Write([]byte("    ]\n")); err != nil {
 		return err
 	}
 
-	// Close graph object
 	if _, err := w.Write([]byte("  }\n")); err != nil {
 		return err
 	}
-
-	// Close root object
 	if _, err := w.Write([]byte("}\n")); err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// ToJSON returns the graph as JSON bytes in BloodHound OpenGraph format.
-func (g *OpenGraph) ToJSON() ([]byte, error) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+// streamArray reads NDJSON lines from src and writes them as a JSON
+// array body (without the surrounding brackets) into w.
+func streamArray(w io.Writer, src *os.File, total, reportInterval int, phase string, progress ProgressFunc) (int, error) {
+	dec := json.NewDecoder(bufio.NewReaderSize(src, 256*1024))
+	idx := 0
+	for {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err == io.EOF {
+			break
+		} else if err != nil {
+			return idx, err
+		}
 
-	nodes := make([]*Node, 0, len(g.nodes))
-	for _, node := range g.nodes {
-		nodes = append(nodes, node)
+		if idx > 0 {
+			if _, err := w.Write([]byte(",\n")); err != nil {
+				return idx, err
+			}
+		}
+		if _, err := w.Write([]byte("      ")); err != nil {
+			return idx, err
+		}
+		if _, err := w.Write(raw); err != nil {
+			return idx, err
+		}
+
+		idx++
+		if progress != nil && reportInterval > 0 && idx%reportInterval == 0 {
+			progress(phase, idx, total)
+		}
 	}
+	return idx, nil
+}
+
+// ---------- Checkpoint helpers ----------------------------------------
+
+// GetNodesAndEdges reads all nodes and edges from disk for checkpointing.
+// The returned slices are ephemeral – they should be serialised and
+// discarded promptly to avoid holding everything in memory.
+func (g *OpenGraph) GetNodesAndEdges() ([]*Node, []*Edge) {
+	g.mu.Lock()
+	g.nodeBuf.Flush() //nolint:errcheck
+	g.edgeBuf.Flush() //nolint:errcheck
+	nodeFileName := g.nodeFile.Name()
+	edgeFileName := g.edgeFile.Name()
+	capNodes := len(g.nodeIDs)
+	capEdges := g.edgeCount
+	g.mu.Unlock()
+
+	nodes := make([]*Node, 0, capNodes)
+	if nf, err := os.Open(nodeFileName); err == nil {
+		dec := json.NewDecoder(bufio.NewReaderSize(nf, 256*1024))
+		for {
+			var node Node
+			if err := dec.Decode(&node); err != nil {
+				break
+			}
+			n := node // copy
+			nodes = append(nodes, &n)
+		}
+		nf.Close()
+	}
+
+	edges := make([]*Edge, 0, capEdges)
+	if ef, err := os.Open(edgeFileName); err == nil {
+		dec := json.NewDecoder(bufio.NewReaderSize(ef, 256*1024))
+		for {
+			var edge Edge
+			if err := dec.Decode(&edge); err != nil {
+				break
+			}
+			e := edge // copy
+			edges = append(edges, &e)
+		}
+		ef.Close()
+	}
+
+	return nodes, edges
+}
+
+// RestoreNodesAndEdges populates the graph from a checkpoint.
+func (g *OpenGraph) RestoreNodesAndEdges(nodes []*Node, edges []*Edge) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Reset dedup state
+	g.nodeIDs = make(map[string]struct{}, len(nodes))
+	g.edgeCount = 0
+
+	// Truncate and rewrite node file
+	g.nodeFile.Truncate(0)           //nolint:errcheck
+	g.nodeFile.Seek(0, io.SeekStart) //nolint:errcheck
+	g.nodeBuf.Reset(g.nodeFile)
+	for _, node := range nodes {
+		g.nodeIDs[node.ID] = struct{}{}
+		appendJSON(g.nodeBuf, node)
+	}
+
+	// Truncate and rewrite edge file
+	g.edgeFile.Truncate(0)           //nolint:errcheck
+	g.edgeFile.Seek(0, io.SeekStart) //nolint:errcheck
+	g.edgeBuf.Reset(g.edgeFile)
+	for _, edge := range edges {
+		appendJSON(g.edgeBuf, edge)
+		g.edgeCount++
+	}
+}
+
+// ---------- In-memory convenience (tests / small graphs) --------------
+
+// ToJSON returns the graph as JSON bytes in BloodHound OpenGraph format.
+// This loads the entire graph into memory – use ExportToFile for large
+// graphs.
+func (g *OpenGraph) ToJSON() ([]byte, error) {
+	nodes, edges := g.GetNodesAndEdges()
 
 	output := openGraphOutput{
 		Graph: openGraphData{
 			Nodes: nodes,
-			Edges: g.edges,
+			Edges: edges,
 		},
 	}
 
@@ -345,7 +499,6 @@ func (g *OpenGraph) ToJSON() ([]byte, error) {
 }
 
 // progressInterval returns how often to report progress.
-// Aims for roughly 20-50 updates for any collection size.
 func progressInterval(total int) int {
 	if total <= 0 {
 		return 1
@@ -355,34 +508,4 @@ func progressInterval(total int) int {
 		interval = 1
 	}
 	return interval
-}
-
-// GetNodesAndEdges returns copies of all nodes and edges for checkpointing.
-func (g *OpenGraph) GetNodesAndEdges() ([]*Node, []*Edge) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	nodes := make([]*Node, 0, len(g.nodes))
-	for _, node := range g.nodes {
-		nodes = append(nodes, node)
-	}
-
-	edges := make([]*Edge, len(g.edges))
-	copy(edges, g.edges)
-
-	return nodes, edges
-}
-
-// RestoreNodesAndEdges restores nodes and edges from a checkpoint.
-func (g *OpenGraph) RestoreNodesAndEdges(nodes []*Node, edges []*Edge) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.nodes = make(map[string]*Node, len(nodes))
-	for _, node := range nodes {
-		g.nodes[node.ID] = node
-	}
-
-	g.edges = make([]*Edge, len(edges))
-	copy(g.edges, edges)
 }

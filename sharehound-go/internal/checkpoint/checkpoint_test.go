@@ -72,7 +72,11 @@ func TestSaveAndLoad(t *testing.T) {
 	manager.MarkTargetProcessed(target2)
 
 	// Create a mock graph with some nodes and edges
-	og := graph.NewOpenGraph("test")
+	og, err := graph.NewOpenGraph("test")
+	if err != nil {
+		t.Fatalf("Failed to create graph: %v", err)
+	}
+	defer og.Close()
 	node1 := graph.NewNode("node1", "TestKind").SetProperty("name", "Test Node 1")
 	node2 := graph.NewNode("node2", "TestKind").SetProperty("name", "Test Node 2")
 	og.AddNode(node1)
@@ -138,7 +142,11 @@ func TestRestoreFrom(t *testing.T) {
 	manager1.MarkTargetProcessed(target1)
 	manager1.MarkTargetProcessed(target2)
 
-	og := graph.NewOpenGraph("test")
+	og, err := graph.NewOpenGraph("test")
+	if err != nil {
+		t.Fatalf("Failed to create graph: %v", err)
+	}
+	defer og.Close()
 	manager1.saveCheckpoint(og, 100, Statistics{})
 
 	// Load and restore to a new manager

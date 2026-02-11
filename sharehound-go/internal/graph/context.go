@@ -29,16 +29,19 @@ type OpenGraphContext struct {
 	elementRights     ShareRights
 	logger            logger.LoggerInterface
 	totalEdgesCreated int
+	hostShareEmitted  bool                // true once host+share+share-rights have been added to graph
+	emittedPathNodes  map[string]struct{} // directory node IDs already committed (edges + rights)
 }
 
 // NewOpenGraphContext creates a new OpenGraphContext.
 func NewOpenGraphContext(graph *OpenGraph, log logger.LoggerInterface) *OpenGraphContext {
 	return &OpenGraphContext{
-		graph:         graph,
-		path:          make([]PathEntry, 0),
-		shareRights:   make(ShareRights),
-		elementRights: make(ShareRights),
-		logger:        log,
+		graph:            graph,
+		path:             make([]PathEntry, 0),
+		shareRights:      make(ShareRights),
+		elementRights:    make(ShareRights),
+		logger:           log,
+		emittedPathNodes: make(map[string]struct{}),
 	}
 }
 
@@ -155,20 +158,6 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		return
 	}
 
-	// Add host node
-	c.graph.AddNodeWithoutValidation(c.host)
-
-	// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost
-	hostEdge := NewEdge(strings.ToUpper(c.host.ID), c.host.ID, kinds.EdgeKindHostsNetworkShare)
-	hostEdge.SetStartMatchBy("name")
-	hostEdge.SetEndMatchBy("id")
-	c.graph.AddEdgeWithoutValidation(hostEdge)
-	c.totalEdgesCreated++
-
-	if c.logger != nil {
-		c.logger.Debug("[add_path_to_graph] Created edge HostsNetworkShare: Computer -> NetworkShareHost")
-	}
-
 	// Check share
 	if c.share == nil {
 		if c.logger != nil {
@@ -177,36 +166,61 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		return
 	}
 
-	// Add share node
-	c.graph.AddNodeWithoutValidation(c.share)
+	// Emit host + share structure only once per context (per share)
+	if !c.hostShareEmitted {
+		c.hostShareEmitted = true
 
-	// Add share rights
-	c.AddRightsToGraph(c.share.ID, c.shareRights, "share")
+		// Add host node
+		c.graph.AddNodeWithoutValidation(c.host)
 
-	// Add HasNetworkShare edge from host to share
-	shareEdge := NewEdge(c.host.ID, c.share.ID, kinds.EdgeKindHasNetworkShare)
-	c.graph.AddEdgeWithoutValidation(shareEdge)
-	c.totalEdgesCreated++
-
-	if c.logger != nil {
-		c.logger.Debug("[add_path_to_graph] Created edge HasNetworkShare: host -> share")
-	}
-
-	// Add path directories with Contains edges
-	parentID := c.share.ID
-	for _, entry := range c.path {
-		c.graph.AddNodeWithoutValidation(entry.Node)
-		c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory")
-
-		containsEdge := NewEdge(parentID, entry.Node.ID, kinds.EdgeKindContains)
-		c.graph.AddEdgeWithoutValidation(containsEdge)
+		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost
+		hostEdge := NewEdge(strings.ToUpper(c.host.ID), c.host.ID, kinds.EdgeKindHostsNetworkShare)
+		hostEdge.SetStartMatchBy("name")
+		hostEdge.SetEndMatchBy("id")
+		c.graph.AddEdgeWithoutValidation(hostEdge)
 		c.totalEdgesCreated++
 
 		if c.logger != nil {
-			c.logger.Debug("[add_path_to_graph] Created edge Contains: " + parentID + " -> " + entry.Node.ID)
+			c.logger.Debug("[add_path_to_graph] Created edge HostsNetworkShare: Computer -> NetworkShareHost")
 		}
 
-		parentID = entry.Node.ID
+		// Add share node
+		c.graph.AddNodeWithoutValidation(c.share)
+
+		// Add share rights
+		c.AddRightsToGraph(c.share.ID, c.shareRights, "share")
+
+		// Add HasNetworkShare edge from host to share
+		shareEdge := NewEdge(c.host.ID, c.share.ID, kinds.EdgeKindHasNetworkShare)
+		c.graph.AddEdgeWithoutValidation(shareEdge)
+		c.totalEdgesCreated++
+
+		if c.logger != nil {
+			c.logger.Debug("[add_path_to_graph] Created edge HasNetworkShare: host -> share")
+		}
+	}
+
+	// Add path directories with Contains edges.
+	// emittedPathNodes tracks which directories have already had their
+	// node, rights, and Contains edge written.  This prevents duplicate
+	// edges for directories that appear in the path of multiple files.
+	parentID := c.share.ID
+	for _, entry := range c.path {
+		if _, already := c.emittedPathNodes[entry.Node.ID]; !already {
+			c.emittedPathNodes[entry.Node.ID] = struct{}{}
+
+			c.graph.AddNodeWithoutValidation(entry.Node)
+			c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory")
+
+			containsEdge := NewEdge(parentID, entry.Node.ID, kinds.EdgeKindContains)
+			c.graph.AddEdgeWithoutValidation(containsEdge)
+			c.totalEdgesCreated++
+
+			if c.logger != nil {
+				c.logger.Debug("[add_path_to_graph] Created edge Contains: " + parentID + " -> " + entry.Node.ID)
+			}
+		}
+		parentID = entry.Node.ID // always advance so child edges use the right parent
 	}
 
 	// Add element node with Contains edge

@@ -200,13 +200,22 @@ func ProcessTarget(
 	semCtx, semCancel := context.WithCancel(context.Background())
 	defer semCancel()
 
+	// done is closed when ProcessTarget returns, so the watcher goroutine exits cleanly
+	// even if the host completes before the timeout fires.
+	done := make(chan struct{})
+	defer close(done)
+
 	// Hook into the timeout to cancel the semaphore context
 	if opts.HostTimeout > 0 {
 		origTimeoutFlag := &timeoutFlag
 		go func() {
-			// Poll until timeout fires
+			// Wait until either the timeout fires or processing finishes
 			for !origTimeoutFlag.Load() {
-				time.Sleep(100 * time.Millisecond)
+				select {
+				case <-done:
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 			semCancel()
 		}()

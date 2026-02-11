@@ -209,7 +209,12 @@ func run(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
 
 	// Create OpenGraph
-	og := graph.NewOpenGraph(kinds.NodeKindNetworkShareBase)
+	og, err := graph.NewOpenGraph(kinds.NodeKindNetworkShareBase)
+	if err != nil {
+		log.Error(fmt.Sprintf("Failed to create graph: %v", err))
+		os.Exit(1)
+	}
+	defer og.Close()
 
 	// Create checkpoint manager
 	cpInterval := time.Duration(checkpointInterval * float64(time.Second))
