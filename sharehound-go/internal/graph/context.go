@@ -29,7 +29,8 @@ type OpenGraphContext struct {
 	elementRights     ShareRights
 	logger            logger.LoggerInterface
 	totalEdgesCreated int
-	hostShareEmitted  bool                // true once host+share+share-rights have been added to graph
+	hostEdgeEmitted   bool                // true once host node + HostsNetworkShare have been added to graph
+	hostShareEmitted  bool                // true once share node + share-rights + HasNetworkShare have been added to graph
 	emittedPathNodes  map[string]struct{} // directory node IDs already committed (edges + rights)
 }
 
@@ -158,17 +159,11 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		return
 	}
 
-	// Check share
-	if c.share == nil {
-		if c.logger != nil {
-			c.logger.Debug("[add_path_to_graph] Share node is None, skipping")
-		}
-		return
-	}
-
-	// Emit host + share structure only once per context (per share)
-	if !c.hostShareEmitted {
-		c.hostShareEmitted = true
+	// Add host node and HostsNetworkShare edge before checking share.
+	// This matches the Python behavior where the host node and the
+	// HostsNetworkShare edge are emitted independently of the share state.
+	if !c.hostEdgeEmitted {
+		c.hostEdgeEmitted = true
 
 		// Add host node
 		c.graph.AddNodeWithoutValidation(c.host)
@@ -183,6 +178,19 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		if c.logger != nil {
 			c.logger.Debug("[add_path_to_graph] Created edge HostsNetworkShare: Computer -> NetworkShareHost")
 		}
+	}
+
+	// Check share
+	if c.share == nil {
+		if c.logger != nil {
+			c.logger.Debug("[add_path_to_graph] Share node is None, skipping")
+		}
+		return
+	}
+
+	// Emit share structure only once per context (per share)
+	if !c.hostShareEmitted {
+		c.hostShareEmitted = true
 
 		// Add share node
 		c.graph.AddNodeWithoutValidation(c.share)
