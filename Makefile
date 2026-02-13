@@ -1,69 +1,102 @@
-.PHONY : all clean build upload
+# ShareHound Go Makefile
 
-all: install clean
+BINARY_NAME=sharehound
+VERSION=1.0.0
+BUILD_DIR=build
+GO=go
 
-clean:
-	@rm -rf `find ./ -type d -name "*__pycache__"`
-	@rm -rf ./build/ ./dist/ ./sharehound.egg-info/
+# Build flags
+LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION)"
 
-docs:
-	@python3 -m pip install pdoc --break-system-packages
-	@echo "[$(shell date)] Generating docs ..."
-	@PDOC_ALLOW_EXEC=1 python3 -m pdoc -d markdown -o ./documentation/ ./sharehound/
-	@echo "[$(shell date)] Done!"
+.PHONY: all build clean test lint fmt deps help
 
-uninstall:
-	python3 -m pip uninstall sharehound --yes --break-system-packages
+all: build
 
-install: build
-	pip install . --break-system-packages
-
+## build: Build the binary
 build:
-	python3 -m pip uninstall sharehound --yes --break-system-packages
-	python3 -m pip install .[build] --break-system-packages
-	python3 -m build --wheel
+	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/sharehound
 
-upload: build
-	python3 -m pip install .[twine] --break-system-packages
-	python3 -m twine upload dist/*
+## build-all: Build for all platforms
+build-all: build-linux build-windows build-darwin
 
+## build-linux: Build for Linux
+build-linux:
+	@echo "Building for Linux..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/sharehound
+	GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/sharehound
+
+## build-windows: Build for Windows
+build-windows:
+	@echo "Building for Windows..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sharehound
+
+## build-darwin: Build for macOS
+build-darwin:
+	@echo "Building for macOS..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=darwin GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/sharehound
+	GOOS=darwin GOARCH=arm64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/sharehound
+
+## clean: Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	@rm -rf $(BUILD_DIR)
+	$(GO) clean
+
+## test: Run tests
 test:
-	@echo "[$(shell date)] Running tests ..."
-	@cd sharehound/tests && python3 run_tests.py
-	@echo "[$(shell date)] Tests completed!"
+	@echo "Running tests..."
+	$(GO) test -v ./...
 
-test-verbose:
-	@echo "[$(shell date)] Running tests with verbose output ..."
-	@cd sharehound/tests && python3 -m unittest discover -v
-	@echo "[$(shell date)] Tests completed!"
-
+## test-coverage: Run tests with coverage
 test-coverage:
-	@echo "[$(shell date)] Installing coverage and running tests with coverage ..."
-	@python3 -m pip install coverage --break-system-packages
-	@coverage run --source=sharehound sharehound/tests/run_tests.py
-	@coverage report
-	@coverage html
-	@echo "[$(shell date)] Coverage report generated in htmlcov/"
+	@echo "Running tests with coverage..."
+	$(GO) test -v -coverprofile=coverage.out ./...
+	$(GO) tool cover -html=coverage.out -o coverage.html
 
-
+## lint: Run linter
 lint:
-	@echo "[$(shell date)] Installing linting tools ..."
-	@python3 -m pip install flake8 black isort --break-system-packages
-	@echo "[$(shell date)] Running flake8 linting ..."
-	@python3 -m flake8 sharehound/ --max-line-length=88 --extend-ignore=E501,E203
-	@echo "[$(shell date)] Running black code formatting check ..."
-	@python3 -m black --check --diff sharehound/
-	@echo "[$(shell date)] Running isort import sorting check ..."
-	@python3 -m isort --check-only --diff sharehound/
-	@echo "[$(shell date)] Linting completed!"
+	@echo "Running linter..."
+	@if command -v golangci-lint > /dev/null; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+	fi
 
-lint-fix:
-	@echo "[$(shell date)] Installing linting tools ..."
-	@python3 -m pip install flake8 black isort --break-system-packages
-	@echo "[$(shell date)] Running black to fix formatting issues ..."
-	@python3 -m black sharehound/
-	@echo "[$(shell date)] Running isort to fix import sorting ..."
-	@python3 -m isort sharehound/
-	@echo "[$(shell date)] Running flake8 to check remaining issues ..."
-	@python3 -m flake8 sharehound/ --max-line-length=88 --extend-ignore=E501,E203
-	@echo "[$(shell date)] Code formatting fixes completed!"
+## fmt: Format code
+fmt:
+	@echo "Formatting code..."
+	$(GO) fmt ./...
+	@if command -v goimports > /dev/null; then \
+		goimports -w .; \
+	fi
+
+## deps: Download dependencies
+deps:
+	@echo "Downloading dependencies..."
+	$(GO) mod download
+	$(GO) mod tidy
+
+## vet: Run go vet
+vet:
+	@echo "Running go vet..."
+	$(GO) vet ./...
+
+## run: Run the binary
+run: build
+	./$(BUILD_DIR)/$(BINARY_NAME)
+
+## install: Install the binary
+install: build
+	@echo "Installing $(BINARY_NAME)..."
+	$(GO) install ./cmd/sharehound
+
+## help: Show this help
+help:
+	@echo "ShareHound Go - Makefile targets:"
+	@echo ""
+	@sed -n 's/^##//p' $(MAKEFILE_LIST) | column -t -s ':' | sed -e 's/^/ /'
