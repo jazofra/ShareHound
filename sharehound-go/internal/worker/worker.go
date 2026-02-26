@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -361,6 +362,24 @@ func processShare(
 
 	// Create OpenGraph context
 	ogc := graph.NewOpenGraphContext(og, taskLog)
+
+	// Extract domain from FQDN (e.g. "server.corp.com" -> "CORP.COM")
+	// and set it on the context so well-known SIDs get domain-prefixed.
+	if parts := strings.SplitN(remoteName, ".", 2); len(parts) == 2 {
+		ogc.SetDomainSuffix(parts[1])
+	} else if opts.Creds.Domain != "" {
+		ogc.SetDomainSuffix(opts.Creds.Domain)
+	}
+
+	// Set computer name for BUILTIN SID prefixing. BUILTIN groups are local
+	// to each computer, so they need the computer FQDN (e.g. "SERVER.CORP.COM-S-1-5-32-545").
+	if strings.Contains(remoteName, ".") {
+		ogc.SetComputerName(remoteName)
+	} else if opts.Creds.Domain != "" {
+		ogc.SetComputerName(remoteName + "." + opts.Creds.Domain)
+	} else {
+		ogc.SetComputerName(remoteName)
+	}
 
 	// Create host node — use remoteName (server name/FQDN) for the node ID and name,
 	// not the resolved IP, to match Python behavior and ensure consistency with
