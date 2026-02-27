@@ -126,13 +126,6 @@ func IsDomainSID(sidString string) bool {
 	return strings.HasPrefix(sidString, "S-1-5-21-")
 }
 
-// IsBuiltinSID returns true if the SID is a BUILTIN group SID (S-1-5-32-*).
-// BUILTIN groups are local to each computer and should be prefixed with the
-// computer's FQDN rather than the domain FQDN.
-func IsBuiltinSID(sidString string) bool {
-	return strings.HasPrefix(sidString, "S-1-5-32-")
-}
-
 // IsEveryone returns true if this is the Everyone SID (S-1-1-0).
 func (s *SID) IsEveryone() bool {
 	return s.String() == "S-1-1-0"

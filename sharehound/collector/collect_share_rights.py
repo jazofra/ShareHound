@@ -120,9 +120,8 @@ def collect_share_rights(
     share_rights = {}
     used_fallback = False
 
-    # Extract domain and computer info for SID normalization
+    # Extract domain info for SID normalization
     domain_fqdn = smb_session.credentials.domain or ""
-    computer_name = smb_session.remote_name or ""
 
     try:
         logger.debug(
@@ -191,7 +190,7 @@ def collect_share_rights(
             maskValue = aceMask.fields["Mask"]
             aceSid = ace["Ace"]["Sid"]
             sid = aceSid.formatCanonical()
-            sid = normalize_sid(sid, domain_fqdn, computer_name)
+            sid = normalize_sid(sid, domain_fqdn)
 
             # Log ACE type
             ace_type_name = (

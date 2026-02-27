@@ -44,9 +44,8 @@ def collect_ntfs_rights(
     try:
         ntfsrights_edges = {}
 
-        # Extract domain and computer info for SID normalization
+        # Extract domain info for SID normalization
         domain_fqdn = smb_session.credentials.domain or ""
-        computer_name = smb_session.remote_name or ""
 
         # Get the security descriptor for the file/directory
         path = ogc.get_string_path_from_root()
@@ -67,7 +66,7 @@ def collect_ntfs_rights(
                     continue
 
                 sid = acl["Ace"]["Sid"].formatCanonical()
-                sid = normalize_sid(sid, domain_fqdn, computer_name)
+                sid = normalize_sid(sid, domain_fqdn)
 
                 # Check for specific rights and create edges
                 mask = acl["Ace"]["Mask"]

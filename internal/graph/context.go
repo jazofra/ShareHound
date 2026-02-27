@@ -32,8 +32,7 @@ type OpenGraphContext struct {
 	totalEdgesCreated int
 	hostShareEmitted  bool                // true once host+share+share-rights have been added to graph
 	emittedPathNodes  map[string]struct{} // directory node IDs already committed (edges + rights)
-	domainSuffix      string              // domain FQDN used to prefix well-known SIDs (e.g. "THIS.DOMAIN.COM")
-	computerName      string              // computer FQDN used to prefix BUILTIN SIDs (e.g. "SERVER.THIS.DOMAIN.COM")
+	domainSuffix      string              // domain FQDN used to prefix non-domain SIDs (e.g. "THIS.DOMAIN.COM")
 }
 
 // NewOpenGraphContext creates a new OpenGraphContext.
@@ -68,18 +67,6 @@ func (c *OpenGraphContext) SetDomainSuffix(domain string) {
 // GetDomainSuffix returns the domain suffix.
 func (c *OpenGraphContext) GetDomainSuffix() string {
 	return c.domainSuffix
-}
-
-// SetComputerName sets the computer FQDN used to prefix BUILTIN group SIDs.
-// BUILTIN groups are local to each computer, so they need the computer's FQDN
-// rather than the domain FQDN (e.g. "SERVER.CORP.COM-S-1-5-32-545").
-func (c *OpenGraphContext) SetComputerName(name string) {
-	c.computerName = strings.ToUpper(name)
-}
-
-// GetComputerName returns the computer name.
-func (c *OpenGraphContext) GetComputerName() string {
-	return c.computerName
 }
 
 // SetShare sets the share node.
@@ -295,20 +282,13 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 
 	edgesCreated := 0
 	for sid, edgeKinds := range rights {
-		// Normalize non-domain SIDs for BloodHound resolution:
-		// - BUILTIN SIDs (S-1-5-32-*) are local to each computer, so they
-		//   get the computer FQDN prefix (e.g. "SERVER.CORP.COM-S-1-5-32-545").
-		// - Other well-known SIDs get the domain FQDN prefix
-		//   (e.g. "CORP.COM-S-1-1-0").
-		// - Domain-relative SIDs (S-1-5-21-*) already contain the domain
-		//   identifier and are used as-is.
+		// Prefix non-domain SIDs with the domain FQDN so BloodHound can
+		// resolve well-known and BUILTIN principals (e.g. "CORP.COM-S-1-1-0",
+		// "CORP.COM-S-1-5-32-545"). Domain-relative SIDs (S-1-5-21-*) already
+		// contain the domain identifier and are used as-is.
 		edgeSID := sid
-		if !smb.IsDomainSID(sid) {
-			if smb.IsBuiltinSID(sid) && c.computerName != "" {
-				edgeSID = c.computerName + "-" + sid
-			} else if c.domainSuffix != "" {
-				edgeSID = c.domainSuffix + "-" + sid
-			}
+		if c.domainSuffix != "" && !smb.IsDomainSID(sid) {
+			edgeSID = c.domainSuffix + "-" + sid
 		}
 		for _, edgeKind := range edgeKinds {
 			edge := NewEdge(edgeSID, elementID, edgeKind)
