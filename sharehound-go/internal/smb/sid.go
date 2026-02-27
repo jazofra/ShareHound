@@ -118,6 +118,14 @@ func GetWellKnownName(sidString string) string {
 	return WellKnownSIDs[sidString]
 }
 
+// IsDomainSID returns true if the SID is a domain-relative SID (S-1-5-21-*).
+// Domain SIDs already contain the domain identifier and do not need a domain prefix
+// for BloodHound matching. Non-domain SIDs (well-known / BUILTIN) need to be
+// prefixed with "DOMAIN.FQDN-" so BloodHound can resolve them.
+func IsDomainSID(sidString string) bool {
+	return strings.HasPrefix(sidString, "S-1-5-21-")
+}
+
 // IsEveryone returns true if this is the Everyone SID (S-1-1-0).
 func (s *SID) IsEveryone() bool {
 	return s.String() == "S-1-1-0"

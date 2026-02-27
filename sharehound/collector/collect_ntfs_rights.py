@@ -13,6 +13,7 @@ from shareql.evaluate.evaluator import RulesEvaluator
 import sharehound.kinds as kinds
 from sharehound.collector.opengraph_context import OpenGraphContext
 from sharehound.core.Logger import Logger, TaskLogger
+from sharehound.core.sid_utils import normalize_sid
 from sharehound.core.SMBSession import SMBSession
 
 
@@ -43,6 +44,9 @@ def collect_ntfs_rights(
     try:
         ntfsrights_edges = {}
 
+        # Extract domain info for SID normalization
+        domain_fqdn = smb_session.credentials.domain or ""
+
         # Get the security descriptor for the file/directory
         path = ogc.get_string_path_from_root()
 
@@ -62,6 +66,7 @@ def collect_ntfs_rights(
                     continue
 
                 sid = acl["Ace"]["Sid"].formatCanonical()
+                sid = normalize_sid(sid, domain_fqdn)
 
                 # Check for specific rights and create edges
                 mask = acl["Ace"]["Mask"]

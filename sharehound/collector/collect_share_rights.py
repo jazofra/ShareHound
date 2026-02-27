@@ -12,6 +12,7 @@ from shareql.evaluate.evaluator import RulesEvaluator
 
 import sharehound.kinds as kinds
 from sharehound.core.Logger import Logger, TaskLogger
+from sharehound.core.sid_utils import normalize_sid
 from sharehound.core.SMBSession import SMBSession
 
 
@@ -119,6 +120,9 @@ def collect_share_rights(
     share_rights = {}
     used_fallback = False
 
+    # Extract domain info for SID normalization
+    domain_fqdn = smb_session.credentials.domain or ""
+
     try:
         logger.debug(
             f"[collect_share_rights] Retrieving security descriptor for share: {share_name}"
@@ -186,6 +190,7 @@ def collect_share_rights(
             maskValue = aceMask.fields["Mask"]
             aceSid = ace["Ace"]["Sid"]
             sid = aceSid.formatCanonical()
+            sid = normalize_sid(sid, domain_fqdn)
 
             # Log ACE type
             ace_type_name = (

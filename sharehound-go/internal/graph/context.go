@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/specterops/sharehound/internal/logger"
+	"github.com/specterops/sharehound/internal/smb"
 	"github.com/specterops/sharehound/pkg/kinds"
 )
 
@@ -31,6 +32,7 @@ type OpenGraphContext struct {
 	totalEdgesCreated int
 	hostShareEmitted  bool                // true once host+share+share-rights have been added to graph
 	emittedPathNodes  map[string]struct{} // directory node IDs already committed (edges + rights)
+	domainSuffix      string              // domain FQDN used to prefix non-domain SIDs (e.g. "THIS.DOMAIN.COM")
 }
 
 // NewOpenGraphContext creates a new OpenGraphContext.
@@ -53,6 +55,17 @@ func (c *OpenGraphContext) SetHost(host *Node) {
 // GetHost returns the host node.
 func (c *OpenGraphContext) GetHost() *Node {
 	return c.host
+}
+
+// SetDomainSuffix sets the domain FQDN used to prefix well-known SIDs
+// so that BloodHound can resolve them (e.g. "CORP.COM-S-1-1-0").
+func (c *OpenGraphContext) SetDomainSuffix(domain string) {
+	c.domainSuffix = strings.ToUpper(domain)
+}
+
+// GetDomainSuffix returns the domain suffix.
+func (c *OpenGraphContext) GetDomainSuffix() string {
+	return c.domainSuffix
 }
 
 // SetShare sets the share node.
@@ -258,14 +271,22 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 
 	edgesCreated := 0
 	for sid, edgeKinds := range rights {
+		// Prefix non-domain SIDs with the domain FQDN so BloodHound can
+		// resolve well-known and BUILTIN principals (e.g. "CORP.COM-S-1-1-0",
+		// "CORP.COM-S-1-5-32-545"). Domain-relative SIDs (S-1-5-21-*) already
+		// contain the domain identifier and are used as-is.
+		edgeSID := sid
+		if c.domainSuffix != "" && !smb.IsDomainSID(sid) {
+			edgeSID = c.domainSuffix + "-" + sid
+		}
 		for _, edgeKind := range edgeKinds {
-			edge := NewEdge(sid, elementID, edgeKind)
+			edge := NewEdge(edgeSID, elementID, edgeKind)
 			c.graph.AddEdgeWithoutValidation(edge)
 			c.totalEdgesCreated++
 			edgesCreated++
 
 			if c.logger != nil {
-				c.logger.Debug("[add_rights_to_graph] Created edge: " + sid + " --[" + edgeKind + "]--> " + elementID)
+				c.logger.Debug("[add_rights_to_graph] Created edge: " + edgeSID + " --[" + edgeKind + "]--> " + elementID)
 			}
 		}
 	}

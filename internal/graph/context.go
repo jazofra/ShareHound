@@ -283,9 +283,9 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 	edgesCreated := 0
 	for sid, edgeKinds := range rights {
 		// Prefix non-domain SIDs with the domain FQDN so BloodHound can
-		// resolve well-known / BUILTIN principals (e.g. "CORP.COM-S-1-1-0").
-		// Domain-relative SIDs (S-1-5-21-*) already contain the domain
-		// identifier and are used as-is.
+		// resolve well-known and BUILTIN principals (e.g. "CORP.COM-S-1-1-0",
+		// "CORP.COM-S-1-5-32-545"). Domain-relative SIDs (S-1-5-21-*) already
+		// contain the domain identifier and are used as-is.
 		edgeSID := sid
 		if c.domainSuffix != "" && !smb.IsDomainSID(sid) {
 			edgeSID = c.domainSuffix + "-" + sid
