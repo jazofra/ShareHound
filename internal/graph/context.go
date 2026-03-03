@@ -57,9 +57,8 @@ func (c *OpenGraphContext) GetHost() *Node {
 	return c.host
 }
 
-// SetDomainSuffix sets the domain FQDN used to prefix non-domain (well-known / BUILTIN)
-// SIDs so that BloodHound can resolve them.  For example, if the domain is
-// "CORP.EXAMPLE.COM", a well-known SID like S-1-1-0 becomes "CORP.EXAMPLE.COM-S-1-1-0".
+// SetDomainSuffix sets the domain FQDN used to prefix well-known SIDs
+// so that BloodHound can resolve them (e.g. "CORP.COM-S-1-1-0").
 func (c *OpenGraphContext) SetDomainSuffix(domain string) {
 	c.domainSuffix = strings.ToUpper(domain)
 }
@@ -298,7 +297,7 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 			edgesCreated++
 
 			if c.logger != nil {
-				c.logger.Debug("[add_rights_to_graph] Created edge: " + sid + " --[" + edgeKind + "]--> " + elementID)
+				c.logger.Debug("[add_rights_to_graph] Created edge: " + edgeSID + " --[" + edgeKind + "]--> " + elementID)
 			}
 		}
 	}

@@ -111,25 +111,12 @@ func (m *Manager) Start(og *graph.OpenGraph, totalTargets int, getStats func() S
 		for {
 			select {
 			case <-m.stopChan:
-				// Final save before exiting — ticker is stopped by defer
+				// Final save before exiting
 				m.saveCheckpoint(og, totalTargets, getStats())
 				return
 			case <-ticker.C:
-				// Only save if we haven't been asked to stop
-				select {
-				case <-m.stopChan:
-					m.saveCheckpoint(og, totalTargets, getStats())
-					return
-				default:
-				}
 				m.saveCheckpoint(og, totalTargets, getStats())
 			case <-m.saveChan:
-				select {
-				case <-m.stopChan:
-					m.saveCheckpoint(og, totalTargets, getStats())
-					return
-				default:
-				}
 				m.saveCheckpoint(og, totalTargets, getStats())
 			}
 		}
