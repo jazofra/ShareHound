@@ -189,7 +189,9 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost
 		hostEdge := NewEdge(strings.ToUpper(c.host.ID), c.host.ID, kinds.EdgeKindHostsNetworkShare)
 		hostEdge.SetStartMatchBy("name")
+		hostEdge.SetStartKind("Computer")
 		hostEdge.SetEndMatchBy("id")
+		hostEdge.SetEndKind(kinds.NodeKindNetworkShareHost)
 		c.graph.AddEdgeWithoutValidation(hostEdge)
 		c.totalEdgesCreated++
 
