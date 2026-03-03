@@ -203,10 +203,12 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		c.graph.AddNodeWithoutValidation(c.share)
 
 		// Add share rights
-		c.AddRightsToGraph(c.share.ID, c.shareRights, "share")
+		c.AddRightsToGraph(c.share.ID, c.shareRights, "share", c.share.Kinds[0])
 
 		// Add HasNetworkShare edge from host to share
 		shareEdge := NewEdge(c.host.ID, c.share.ID, kinds.EdgeKindHasNetworkShare)
+		shareEdge.SetStartKind(kinds.NodeKindNetworkShareHost)
+		shareEdge.SetEndKind(c.share.Kinds[0])
 		c.graph.AddEdgeWithoutValidation(shareEdge)
 		c.totalEdgesCreated++
 
@@ -220,14 +222,17 @@ func (c *OpenGraphContext) AddPathToGraph() {
 	// node, rights, and Contains edge written.  This prevents duplicate
 	// edges for directories that appear in the path of multiple files.
 	parentID := c.share.ID
+	parentKind := c.share.Kinds[0]
 	for _, entry := range c.path {
 		if _, already := c.emittedPathNodes[entry.Node.ID]; !already {
 			c.emittedPathNodes[entry.Node.ID] = struct{}{}
 
 			c.graph.AddNodeWithoutValidation(entry.Node)
-			c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory")
+			c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory", kinds.NodeKindDirectory)
 
 			containsEdge := NewEdge(parentID, entry.Node.ID, kinds.EdgeKindContains)
+			containsEdge.SetStartKind(parentKind)
+			containsEdge.SetEndKind(kinds.NodeKindDirectory)
 			c.graph.AddEdgeWithoutValidation(containsEdge)
 			c.totalEdgesCreated++
 
@@ -236,6 +241,7 @@ func (c *OpenGraphContext) AddPathToGraph() {
 			}
 		}
 		parentID = entry.Node.ID // always advance so child edges use the right parent
+		parentKind = kinds.NodeKindDirectory
 	}
 
 	// Add element node with Contains edge
@@ -244,9 +250,11 @@ func (c *OpenGraphContext) AddPathToGraph() {
 	}
 
 	c.graph.AddNodeWithoutValidation(c.element)
-	c.AddRightsToGraph(c.element.ID, c.elementRights, "file")
+	c.AddRightsToGraph(c.element.ID, c.elementRights, "file", c.element.Kinds[0])
 
 	elementEdge := NewEdge(parentID, c.element.ID, kinds.EdgeKindContains)
+	elementEdge.SetStartKind(parentKind)
+	elementEdge.SetEndKind(c.element.Kinds[0])
 	c.graph.AddEdgeWithoutValidation(elementEdge)
 	c.totalEdgesCreated++
 
@@ -256,7 +264,7 @@ func (c *OpenGraphContext) AddPathToGraph() {
 }
 
 // AddRightsToGraph adds rights edges to the graph.
-func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights, elementType string) {
+func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights, elementType string, nodeKind string) {
 	if rights == nil {
 		if c.logger != nil {
 			c.logger.Warning("[add_rights_to_graph] Rights is None for " + elementType + ": " + elementID)
@@ -283,6 +291,7 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 		}
 		for _, edgeKind := range edgeKinds {
 			edge := NewEdge(edgeSID, elementID, edgeKind)
+			edge.SetEndKind(nodeKind)
 			c.graph.AddEdgeWithoutValidation(edge)
 			c.totalEdgesCreated++
 			edgesCreated++
