@@ -1,11 +1,9 @@
-# ShareHound Go
+# ShareHound
 
-A Go implementation of [ShareHound](https://github.com/p0dalirius/ShareHound) - a tool that maps network share access rights into BloodHound OpenGraph format for security analysis.
+A tool that maps network share access rights into BloodHound OpenGraph format for security analysis.
 
-**Original Python version by Remi Gascou ([@podalirius_](https://twitter.com/podalirius_)) @ SpecterOps**
-**Go port by Javier Azofra @ Siemens Healthineers**
-
-This is a complete port with **full feature parity** with the Python version, producing identical graph structures compatible with BloodHound Enterprise and Community editions.
+**Original project by Remi Gascou ([@podalirius_](https://twitter.com/podalirius_)) @ SpecterOps**
+**Go implementation by Javier Azofra @ Siemens Healthineers**
 
 ## Features
 
@@ -625,25 +623,14 @@ Available integration tests:
 - [cobra](https://github.com/spf13/cobra) - CLI framework
 - [progressbar](https://github.com/schollz/progressbar) - Progress display
 
-## Feature Parity with Python Version
-
-This Go implementation maintains full feature parity with the original Python ShareHound:
-
-- Same 9 node types
-- Same 28 edge types
-- Same access mask mappings (17 share-level, 11 NTFS-level)
-- Same ShareQL rule syntax
-- Same output format (BloodHound OpenGraph JSON)
-- Same CLI flags and behavior
-
 ## License
 
 MIT License - see LICENSE file for details.
 
 ## Credits
 
-- **Original Python implementation:** Remi Gascou ([@podalirius_](https://twitter.com/podalirius_)) @ SpecterOps - [p0dalirius/ShareHound](https://github.com/p0dalirius/ShareHound)
-- **Go port:** Javier Azofra @ Siemens Healthineers
+- **Original project:** Remi Gascou ([@podalirius_](https://twitter.com/podalirius_)) @ SpecterOps - [p0dalirius/ShareHound](https://github.com/p0dalirius/ShareHound)
+- **Go implementation:** Javier Azofra @ Siemens Healthineers
 - **Associated blog post:** [ShareHound: An OpenGraph Collector for Network Shares](https://specterops.io/blog/2025/10/30/sharehound-an-opengraph-collector-for-network-shares/)
 
 ## Contributing
