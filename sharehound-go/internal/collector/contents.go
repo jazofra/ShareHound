@@ -210,7 +210,8 @@ func collectContentsAtDepth(
 				kinds.NodeKindDirectory,
 			).SetProperty("name", name).
 				SetProperty("Path", fullPath).
-				SetProperty("UNCPath", uncPath)
+				SetProperty("UNCPath", uncPath).
+				SetProperty("depth", depth)
 
 			// Add timestamp properties if available
 			if !info.CreatedTime.IsZero() {
@@ -278,7 +279,8 @@ func collectContentsAtDepth(
 				SetProperty("Path", fullPath).
 				SetProperty("UNCPath", uncPath).
 				SetProperty("fileSize", info.Size).
-				SetProperty("extension", ext)
+				SetProperty("extension", ext).
+				SetProperty("depth", depth)
 
 			// Add timestamp properties if available
 			if !info.CreatedTime.IsZero() {

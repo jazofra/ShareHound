@@ -302,13 +302,13 @@ To output uncompressed JSON, use a `.json` extension:
 | `NetworkShareHost` | An SMB server/host |
 | `NetworkShareSMB` | An SMB share |
 | `NetworkShareDFS` | A DFS share |
-| `File` | A file on a share |
-| `Directory` | A directory on a share |
+| `File` | A file on a share (`depth`, `fileSize`, `extension`, timestamps) |
+| `Directory` | A directory on a share (`depth`, timestamps) |
 | `Principal` | A security principal (generic) |
 | `User` | A user principal |
 | `Group` | A group principal |
 
-### Edge Types (28 total)
+### Edge Types (31 total)
 
 #### Containment Edges (3)
 | Edge Type | Description |
@@ -354,6 +354,24 @@ To output uncompressed JSON, use a `.json` extension:
 - `CanNTFSWriteDacl` - NTFS modify DACL
 - `CanNTFSReadControl` - NTFS read security descriptor
 - `CanNTFSDelete` - NTFS delete permission
+
+#### Effective Access Edges (3)
+
+Derived edges that represent what a principal can **actually** do when accessing a file or
+directory over SMB.  They are emitted only when the same SID holds matching generic rights
+at **both** the share level and the NTFS level — because Windows enforces both DACLs and
+grants only the intersection.
+
+| Edge Type | Share right required | NTFS right required |
+|-----------|---------------------|---------------------|
+| `CanEffectiveRead` | `CanGenericRead` or `CanGenericAll` | `CanNTFSGenericRead` or `CanNTFSGenericAll` |
+| `CanEffectiveWrite` | `CanGenericWrite` or `CanGenericAll` | `CanNTFSGenericWrite` or `CanNTFSGenericAll` |
+| `CanEffectiveExecute` | `CanGenericExecute` or `CanGenericAll` | `CanNTFSGenericExecute` or `CanNTFSGenericAll` |
+
+> **Limitation:** effective edges are per-SID only.  If a user inherits share read
+> through a group SID but holds NTFS read under their personal SID (or vice versa),
+> no effective edge is emitted.  BloodHound's AD graph can close this gap via group
+> membership traversal at query time.
 
 ### How Edges Are Built
 
