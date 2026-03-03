@@ -3,6 +3,7 @@
 A tool that maps network share access rights into BloodHound OpenGraph format for security analysis.
 
 **Original project by Remi Gascou ([@podalirius_](https://twitter.com/podalirius_)) @ SpecterOps**
+
 **Go implementation by Javier Azofra @ Siemens Healthineers**
 
 ## Features
@@ -24,14 +25,11 @@ A tool that maps network share access rights into BloodHound OpenGraph format fo
 
 ```bash
 # Clone the repository
-git clone https://github.com/specterops/sharehound.git
-cd sharehound/sharehound-go
+git clone https://github.com/jazofra/sharehound
+cd sharehound
 
 # Build for current platform
-make build
-
-# Or build for all platforms
-make build-all
+go build -o sharehound.exe .\cmd\sharehound\
 ```
 
 ### Pre-built Binaries
@@ -636,3 +634,4 @@ MIT License - see LICENSE file for details.
 ## Contributing
 
 Pull requests are welcome. Feel free to open an issue if you want to add other features.
+
