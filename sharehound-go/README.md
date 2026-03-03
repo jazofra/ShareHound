@@ -357,6 +357,81 @@ To output uncompressed JSON, use a `.json` extension:
 - `CanNTFSReadControl` - NTFS read security descriptor
 - `CanNTFSDelete` - NTFS delete permission
 
+### How Edges Are Built
+
+This section describes the pipeline that turns raw Windows security descriptors into
+BloodHound graph edges.
+
+#### 1. Binary Security Descriptor Parsing (`internal/smb/security_descriptor.go`, `internal/smb/sid.go`)
+
+When ShareHound opens a file, directory, or queries a share, it calls
+`QuerySecurityDescriptor` over SMB to retrieve the raw binary Windows Security Descriptor.
+Three functions parse it:
+
+- **`ParseSecurityDescriptor`** — reads the header (revision, control flags, byte offsets)
+  and conditionally parses the Owner SID, Group SID, SACL, and DACL.
+- **`ParseACL`** — reads the ACL header (revision, size, ACE count) and iterates through
+  each ACE at the correct byte offset.
+- **`ParseACE`** — extracts each entry: type (byte 0), flags (byte 1), size (bytes 2–3),
+  access mask (`uint32` at offset 4), SID (starting at offset 8). Only
+  `ACCESS_ALLOWED` ACEs (type `0x00`) produce edges.
+
+SIDs are parsed by `ParseSID` (`internal/smb/sid.go`) — it reads the revision,
+sub-authority count, identifier authority, and variable-length sub-authorities — then
+formatted as the canonical `S-R-I-SA1-SA2-...-SAn` string used as the edge source.
+
+#### 2. Access Mask → Edge Kinds (`internal/smb/access_mask.go`)
+
+The parsed `uint32` access mask is converted to a slice of edge kind strings by
+bitwise-ANDing it against every known permission flag. A single ACE with multiple bits
+set produces multiple edges. Two mappings are used:
+
+- **`NTFSRightsMapping`** — applied to file and directory ACEs; produces the
+  `CanNTFS*` edge kinds listed above.
+- **`ShareRightsMapping`** — applied to share-level ACEs (retrieved via SRVSVC RPC);
+  produces the generic and DS-rights edge kinds listed above.
+
+Functions `GetNTFSRightsForMask(mask)` and `GetShareRightsForMask(mask)` implement this
+logic and return all matching edge kinds for a given mask.
+
+#### 3. Rights Collection (`internal/collector/`)
+
+| Collector | Source | Fallback |
+|-----------|--------|----------|
+| `share_rights.go` — `CollectShareRights` | SRVSVC RPC share security descriptor | Root folder NTFS SD |
+| `ntfs_rights.go` — `CollectNTFSRights` | `QuerySecurityDescriptor` per file/dir | — |
+
+Both return a `ShareRights` map (`map[string][]string`, i.e. SID → edge kinds).
+
+#### 4. Graph Edge Creation (`internal/graph/context.go`)
+
+`AddRightsToGraph(elementID, rights, elementType, nodeKind)` converts the `ShareRights`
+map into actual graph edges:
+
+1. For each SID in the map, non-domain SIDs (well-known / BUILTIN such as `S-1-1-0` or
+   `S-1-5-32-545`) are prefixed with the domain FQDN so BloodHound can resolve them
+   (e.g. `CORP.COM-S-1-1-0`). Domain-relative SIDs (`S-1-5-21-*`) are used as-is.
+2. For each edge kind in the SID's list, an edge is created:
+   `NewEdge(SID, elementID, edgeKind)` with `SetEndKind(nodeKind)` so BloodHound
+   knows the type of the target node.
+
+`AddPathToGraph` calls `AddRightsToGraph` at three levels: the share node (share-level
+rights), each directory in the traversal path (NTFS rights), and the leaf file or
+directory element (NTFS rights).
+
+#### Data Flow
+
+```
+SMB QuerySecurityDescriptor (binary)
+  └─ ParseSecurityDescriptor / ParseACL / ParseACE
+        └─ GetNTFSRightsForMask(ace.Mask)  →  []edgeKind
+              └─ ShareRights map { SID → []edgeKind }
+                    └─ AddRightsToGraph()
+                          └─ NewEdge(SID, nodeID, edgeKind)
+                                SetEndKind(nodeKind)
+                                → BloodHound OpenGraph JSON
+```
+
 ## ShareQL Rules
 
 ShareQL is a domain-specific language for filtering what gets explored and processed. Rules are evaluated in order, and the first matching rule determines the action.
