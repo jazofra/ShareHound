@@ -76,6 +76,15 @@ const (
 	EdgeKindCanNTFSDelete               = "CanNTFSDelete"
 )
 
+// Effective access edge kinds — intersection of share-level and NTFS-level generic rights
+// for the same SID. Represents what a principal can actually do when accessing a file
+// over SMB (both permission layers must allow the operation).
+const (
+	EdgeKindCanEffectiveRead    = "CanEffectiveRead"
+	EdgeKindCanEffectiveWrite   = "CanEffectiveWrite"
+	EdgeKindCanEffectiveExecute = "CanEffectiveExecute"
+)
+
 // AllNodeKinds returns all node kinds
 func AllNodeKinds() []string {
 	return []string{
@@ -130,5 +139,9 @@ func AllEdgeKinds() []string {
 		EdgeKindCanNTFSWriteDacl,
 		EdgeKindCanNTFSReadControl,
 		EdgeKindCanNTFSDelete,
+		// Effective access (intersection of share-level and NTFS-level)
+		EdgeKindCanEffectiveRead,
+		EdgeKindCanEffectiveWrite,
+		EdgeKindCanEffectiveExecute,
 	}
 }

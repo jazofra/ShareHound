@@ -101,3 +101,50 @@ func GetNTFSRightsForMask(mask uint32) []string {
 	}
 	return rights
 }
+
+// hasAny returns true if edgeKinds contains any of the targets.
+func hasAny(edgeKinds []string, targets ...string) bool {
+	for _, k := range edgeKinds {
+		for _, t := range targets {
+			if k == t {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ComputeEffectiveRights returns the effective access edge kinds for a single SID
+// by intersecting its share-level generic rights with its NTFS-level generic rights.
+//
+// Windows enforces both layers when a file is accessed over SMB: the share DACL is
+// checked first, then the NTFS DACL.  A principal needs permission at both layers to
+// perform an operation, so effective access = shareRights ∩ ntfsRights.
+//
+// Only the four generic right categories (Read / Write / Execute / All) are considered
+// because the DS_* share rights have no direct NTFS counterpart.
+//
+// Note: this is per-SID only.  Group memberships are not resolved here — a user who
+// inherits share read through a group and has NTFS read directly will not receive an
+// effective edge unless both ACEs reference the same SID.
+func ComputeEffectiveRights(shareKinds, ntfsKinds []string) []string {
+	readShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericRead, kinds.EdgeKindCanGenericAll)
+	writeShare := hasAny(shareKinds, kinds.EdgeKindCanGenericWrite, kinds.EdgeKindCanGenericAll)
+	execShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericExecute, kinds.EdgeKindCanGenericAll)
+
+	readNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericRead, kinds.EdgeKindCanNTFSGenericAll)
+	writeNTFS := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericWrite, kinds.EdgeKindCanNTFSGenericAll)
+	execNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericExecute, kinds.EdgeKindCanNTFSGenericAll)
+
+	var effective []string
+	if readShare && readNTFS {
+		effective = append(effective, kinds.EdgeKindCanEffectiveRead)
+	}
+	if writeShare && writeNTFS {
+		effective = append(effective, kinds.EdgeKindCanEffectiveWrite)
+	}
+	if execShare && execNTFS {
+		effective = append(effective, kinds.EdgeKindCanEffectiveExecute)
+	}
+	return effective
+}

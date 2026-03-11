@@ -32,8 +32,12 @@ func CollectNTFSRights(
 		return rights, nil
 	}
 
-	// Process each ACE
+	// Process each ACE — only ACCESS_ALLOWED ACEs grant rights
 	for _, ace := range sd.Dacl.Aces {
+		if !ace.IsAccessAllowed() {
+			continue
+		}
+
 		if ace.SID == nil {
 			continue
 		}
