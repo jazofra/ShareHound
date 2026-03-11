@@ -186,8 +186,11 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		// Add host node
 		c.graph.AddNodeWithoutValidation(c.host)
 
-		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost
-		hostEdge := NewEdge(strings.ToUpper(c.host.ID), c.host.ID, kinds.EdgeKindHostsNetworkShare)
+		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost.
+		// Use the "name" property (plain FQDN) for the Computer lookup so it does
+		// not collide with the NetworkShareHost node ID (which carries a prefix).
+		hostName := c.host.GetStringProperty("name")
+		hostEdge := NewEdge(strings.ToUpper(hostName), c.host.ID, kinds.EdgeKindHostsNetworkShare)
 		hostEdge.SetStartMatchBy("name")
 		hostEdge.SetStartKind("Computer")
 		hostEdge.SetEndMatchBy("id")
@@ -205,8 +208,10 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		// Add share rights
 		c.AddRightsToGraph(c.share.ID, c.shareRights, "share", c.share.Kinds[0])
 
-		// Add HasNetworkShare edge from host to share
+		// Add HasNetworkShare edge from host to share.
+		// Match NetworkShareHost by id (prefixed) to avoid ambiguity with name.
 		shareEdge := NewEdge(c.host.ID, c.share.ID, kinds.EdgeKindHasNetworkShare)
+		shareEdge.SetStartMatchBy("id")
 		shareEdge.SetStartKind(kinds.NodeKindNetworkShareHost)
 		shareEdge.SetEndKind(c.share.Kinds[0])
 		c.graph.AddEdgeWithoutValidation(shareEdge)

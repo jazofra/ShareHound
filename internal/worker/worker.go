@@ -371,10 +371,13 @@ func processShare(
 		ogc.SetDomainSuffix(opts.Creds.Domain)
 	}
 
-	// Create host node — use remoteName (server name/FQDN) for the node ID and name,
-	// not the resolved IP, to match Python behavior and ensure consistency with
-	// file/directory UNC paths (which use smbSession.GetRemoteName()).
-	hostNode := graph.NewNode(remoteName, kinds.NodeKindNetworkShareHost).
+	// Create host node.  The node ID carries a "NSHOST:" prefix so that it
+	// cannot collide with the BloodHound Computer node that shares the same
+	// FQDN — both endpoints of the HostsNetworkShare edge would otherwise
+	// resolve to the same node (self-loop → "invalid relationship" in BHE).
+	// The "name" property stays as the plain FQDN for display purposes and
+	// so the HostsNetworkShare edge can look up the Computer node by name.
+	hostNode := graph.NewNode("NSHOST:"+strings.ToLower(remoteName), kinds.NodeKindNetworkShareHost).
 		SetProperty("name", remoteName)
 	ogc.SetHost(hostNode)
 
