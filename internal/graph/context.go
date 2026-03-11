@@ -229,6 +229,7 @@ func (c *OpenGraphContext) AddPathToGraph() {
 
 			c.graph.AddNodeWithoutValidation(entry.Node)
 			c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory", kinds.NodeKindDirectory)
+			c.AddEffectiveRightsToGraph(entry.Node.ID, entry.Rights, kinds.NodeKindDirectory)
 
 			containsEdge := NewEdge(parentID, entry.Node.ID, kinds.EdgeKindContains)
 			containsEdge.SetStartKind(parentKind)
@@ -251,6 +252,7 @@ func (c *OpenGraphContext) AddPathToGraph() {
 
 	c.graph.AddNodeWithoutValidation(c.element)
 	c.AddRightsToGraph(c.element.ID, c.elementRights, "file", c.element.Kinds[0])
+	c.AddEffectiveRightsToGraph(c.element.ID, c.elementRights, c.element.Kinds[0])
 
 	elementEdge := NewEdge(parentID, c.element.ID, kinds.EdgeKindContains)
 	elementEdge.SetStartKind(parentKind)
@@ -304,6 +306,42 @@ func (c *OpenGraphContext) AddRightsToGraph(elementID string, rights ShareRights
 
 	if c.logger != nil {
 		c.logger.Debug("[add_rights_to_graph] Created " + string(rune(edgesCreated+'0')) + " rights edge(s)")
+	}
+}
+
+// AddEffectiveRightsToGraph computes and emits effective access edges for a node.
+//
+// For each SID that appears in nodeRights (NTFS-level), it intersects that SID's
+// share-level rights (from c.shareRights) with its NTFS rights using
+// smb.ComputeEffectiveRights.  The resulting CanEffectiveRead / CanEffectiveWrite /
+// CanEffectiveExecute edges are written to the graph with the supplied nodeKind on the
+// end endpoint.
+//
+// Effective edges are only meaningful at the file/directory level, never at the share
+// node itself (the share boundary is already represented by share-level rights edges).
+func (c *OpenGraphContext) AddEffectiveRightsToGraph(nodeID string, nodeRights ShareRights, nodeKind string) {
+	for sid, ntfsKinds := range nodeRights {
+		shareKinds := c.shareRights[sid]
+		effective := smb.ComputeEffectiveRights(shareKinds, ntfsKinds)
+		if len(effective) == 0 {
+			continue
+		}
+
+		edgeSID := sid
+		if c.domainSuffix != "" && !smb.IsDomainSID(sid) {
+			edgeSID = c.domainSuffix + "-" + sid
+		}
+
+		for _, edgeKind := range effective {
+			edge := NewEdge(edgeSID, nodeID, edgeKind)
+			edge.SetEndKind(nodeKind)
+			c.graph.AddEdgeWithoutValidation(edge)
+			c.totalEdgesCreated++
+
+			if c.logger != nil {
+				c.logger.Debug("[add_effective_rights] Created edge: " + edgeSID + " --[" + edgeKind + "]--> " + nodeID)
+			}
+		}
 	}
 }
 
