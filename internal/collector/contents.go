@@ -292,6 +292,19 @@ func collectContentsAtDepth(
 
 			ogc.SetElement(fileNode)
 
+			// If file has no NTFS rights (security descriptor not accessible),
+			// inherit from nearest ancestor directory with non-empty rights.
+			if len(elementRights) == 0 {
+				path := ogc.GetPath()
+				for i := len(path) - 1; i >= 0; i-- {
+					if len(path[i].Rights) > 0 {
+						elementRights = path[i].Rights
+						ogc.SetElementRights(elementRights)
+						break
+					}
+				}
+			}
+
 			if rulesEval.CanProcess(ruleFile) {
 				ogc.AddPathToGraph()
 				counts.ProcessedFiles++
