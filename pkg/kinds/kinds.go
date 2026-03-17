@@ -67,7 +67,6 @@ const (
 	EdgeKindCanNTFSGenericWrite         = "CanNTFSGenericWrite"
 	EdgeKindCanNTFSGenericExecute       = "CanNTFSGenericExecute"
 	EdgeKindCanNTFSGenericAll           = "CanNTFSGenericAll"
-	EdgeKindCanNTFSMaximumAllowed       = "CanNTFSMaximumAllowed"
 	EdgeKindCanNTFSAccessSystemSecurity = "CanNTFSAccessSystemSecurity"
 	EdgeKindCanNTFSSynchronize          = "CanNTFSSynchronize"
 	EdgeKindCanNTFSWriteOwner           = "CanNTFSWriteOwner"
@@ -129,11 +128,10 @@ var EdgeDescriptions = map[string]string{
 	EdgeKindCanWriteOwner:  "Share-level DACL grants WRITE_OWNER, allowing the principal to change the object owner.",
 
 	// NTFS-level permission edges
-	EdgeKindCanNTFSGenericRead:          "NTFS DACL grants GENERIC_READ, allowing the principal to read file contents and attributes.",
-	EdgeKindCanNTFSGenericWrite:         "NTFS DACL grants GENERIC_WRITE, allowing the principal to write file contents and attributes.",
-	EdgeKindCanNTFSGenericExecute:       "NTFS DACL grants GENERIC_EXECUTE, allowing the principal to execute files and traverse directories.",
-	EdgeKindCanNTFSGenericAll:           "NTFS DACL grants GENERIC_ALL (full control) over the file or directory.",
-	EdgeKindCanNTFSMaximumAllowed:       "NTFS DACL grants MAXIMUM_ALLOWED, requesting the maximum permissions available to the principal.",
+	EdgeKindCanNTFSGenericRead:          "NTFS DACL grants GENERIC_READ (0x80000000). Rarely stored in on-disk ACEs — Windows normally maps this to specific rights (FILE_READ_DATA | FILE_READ_ATTRIBUTES | FILE_READ_EA | READ_CONTROL | SYNCHRONIZE) before writing. Kept as a defensive fallback.",
+	EdgeKindCanNTFSGenericWrite:         "NTFS DACL grants GENERIC_WRITE (0x40000000). Rarely stored in on-disk ACEs — Windows normally maps this to specific rights (FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA | READ_CONTROL | SYNCHRONIZE) before writing. Kept as a defensive fallback.",
+	EdgeKindCanNTFSGenericExecute:       "NTFS DACL grants GENERIC_EXECUTE (0x20000000). Rarely stored in on-disk ACEs — Windows normally maps this to specific rights (FILE_EXECUTE | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) before writing. Kept as a defensive fallback.",
+	EdgeKindCanNTFSGenericAll:           "NTFS DACL grants GENERIC_ALL (0x10000000). Rarely stored in on-disk ACEs — Windows normally maps this to FILE_ALL_ACCESS (0x001F01FF) before writing. Kept as a defensive fallback.",
 	EdgeKindCanNTFSAccessSystemSecurity: "NTFS DACL grants ACCESS_SYSTEM_SECURITY, allowing the principal to read or modify the SACL (audit rules).",
 	EdgeKindCanNTFSSynchronize:          "NTFS DACL grants SYNCHRONIZE, allowing the principal to use the object for synchronization.",
 	EdgeKindCanNTFSWriteOwner:           "NTFS DACL grants WRITE_OWNER, allowing the principal to change the file or directory owner.",
@@ -205,7 +203,6 @@ func AllEdgeKinds() []string {
 		EdgeKindCanNTFSGenericWrite,
 		EdgeKindCanNTFSGenericExecute,
 		EdgeKindCanNTFSGenericAll,
-		EdgeKindCanNTFSMaximumAllowed,
 		EdgeKindCanNTFSAccessSystemSecurity,
 		EdgeKindCanNTFSSynchronize,
 		EdgeKindCanNTFSWriteOwner,

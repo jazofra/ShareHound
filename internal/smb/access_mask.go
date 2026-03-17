@@ -35,7 +35,6 @@ const (
 	NTFS_GENERIC_WRITE          uint32 = 0x40000000
 	NTFS_GENERIC_EXECUTE        uint32 = 0x20000000
 	NTFS_GENERIC_ALL            uint32 = 0x10000000
-	NTFS_MAXIMUM_ALLOWED        uint32 = 0x02000000
 	NTFS_ACCESS_SYSTEM_SECURITY uint32 = 0x01000000
 	NTFS_SYNCHRONIZE            uint32 = 0x00100000
 	NTFS_WRITE_OWNER            uint32 = 0x00080000
@@ -84,7 +83,6 @@ var NTFSRightsMapping = map[string]uint32{
 	kinds.EdgeKindCanNTFSGenericWrite:         NTFS_GENERIC_WRITE,
 	kinds.EdgeKindCanNTFSGenericExecute:       NTFS_GENERIC_EXECUTE,
 	kinds.EdgeKindCanNTFSGenericAll:           NTFS_GENERIC_ALL,
-	kinds.EdgeKindCanNTFSMaximumAllowed:       NTFS_MAXIMUM_ALLOWED,
 	kinds.EdgeKindCanNTFSAccessSystemSecurity: NTFS_ACCESS_SYSTEM_SECURITY,
 	kinds.EdgeKindCanNTFSSynchronize:          NTFS_SYNCHRONIZE,
 	kinds.EdgeKindCanNTFSWriteOwner:           NTFS_WRITE_OWNER,

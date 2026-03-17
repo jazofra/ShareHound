@@ -306,7 +306,7 @@ To output uncompressed JSON, use a `.json` extension:
 | `User` | A user principal |
 | `Group` | A group principal |
 
-### Edge Types (40 total)
+### Edge Types (39 total)
 
 #### Containment Edges (3)
 | Edge Type | Description |
@@ -340,20 +340,21 @@ To output uncompressed JSON, use a `.json` extension:
 - `CanWriteDacl` - Modify DACL
 - `CanWriteOwner` - Take ownership
 
-#### NTFS-Level Permission Edges (20)
+#### NTFS-Level Permission Edges (19)
 
-**Generic & Standard Rights:**
-- `CanNTFSGenericRead` - NTFS generic read
-- `CanNTFSGenericWrite` - NTFS generic write
-- `CanNTFSGenericExecute` - NTFS generic execute
-- `CanNTFSGenericAll` - NTFS full control
-- `CanNTFSMaximumAllowed` - Maximum allowed access
-- `CanNTFSAccessSystemSecurity` - Access system security
-- `CanNTFSSynchronize` - Synchronize access
-- `CanNTFSWriteOwner` - NTFS take ownership
-- `CanNTFSWriteDacl` - NTFS modify DACL
-- `CanNTFSReadControl` - NTFS read security descriptor
-- `CanNTFSDelete` - NTFS delete permission
+**Generic Rights (defensive fallback — rarely stored in on-disk ACEs; Windows maps these to specific rights before writing):**
+- `CanNTFSGenericRead` - GENERIC_READ (0x80000000)
+- `CanNTFSGenericWrite` - GENERIC_WRITE (0x40000000)
+- `CanNTFSGenericExecute` - GENERIC_EXECUTE (0x20000000)
+- `CanNTFSGenericAll` - GENERIC_ALL (0x10000000)
+
+**Standard Rights:**
+- `CanNTFSAccessSystemSecurity` - ACCESS_SYSTEM_SECURITY (0x01000000) — read/modify SACL
+- `CanNTFSSynchronize` - SYNCHRONIZE (0x00100000)
+- `CanNTFSWriteOwner` - WRITE_OWNER (0x00080000) — take ownership
+- `CanNTFSWriteDacl` - WRITE_DAC (0x00040000) — change permissions
+- `CanNTFSReadControl` - READ_CONTROL (0x00020000) — read security descriptor
+- `CanNTFSDelete` - DELETE (0x00010000)
 
 **Object-Specific (File/Directory) Rights:**
 - `CanNTFSReadData` - Read file contents / list directory (FILE_READ_DATA)
