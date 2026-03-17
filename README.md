@@ -306,7 +306,7 @@ To output uncompressed JSON, use a `.json` extension:
 | `User` | A user principal |
 | `Group` | A group principal |
 
-### Edge Types (42 total)
+### Edge Types (45 total)
 
 #### Containment Edges (3)
 | Edge Type | Description |
@@ -315,13 +315,24 @@ To output uncompressed JSON, use a `.json` extension:
 | `HasNetworkShare` | Host to Share relationship |
 | `Contains` | Parent to Child (directory to file/subdirectory) |
 
-#### Share-Level Permission Edges (17)
+#### Share-Level Permission Edges (20)
 
 **Generic Rights:**
-- `CanGenericRead` - Generic read access
-- `CanGenericWrite` - Generic write access
-- `CanGenericExecute` - Generic execute access
-- `CanGenericAll` - Full control
+- `CanGenericRead` - Generic read access (GENERIC_READ = 0x80000000)
+- `CanGenericWrite` - Generic write access (GENERIC_WRITE = 0x40000000)
+- `CanGenericExecute` - Generic execute access (GENERIC_EXECUTE = 0x20000000)
+- `CanGenericAll` - Full control (GENERIC_ALL = 0x10000000)
+
+**File-Specific Rights:**
+- `CanShareRead` - FILE_READ_DATA (0x00000001) at share level
+- `CanShareWrite` - FILE_WRITE_DATA (0x00000002) at share level
+- `CanShareExecute` - FILE_EXECUTE (0x00000020) at share level
+
+> **Note:** Windows share permissions (Read/Change/Full Control) set in the GUI use
+> these file-specific bits, *not* the generic flags above. For example, the standard
+> "Read" share permission uses mask `0x001200A9` which has `FILE_READ_DATA (0x1)` set
+> but **not** `GENERIC_READ (0x80000000)`. Both are checked when computing effective
+> access.
 
 **Directory Service Rights:**
 - `CanDsCreateChild` - Create child objects
@@ -375,9 +386,9 @@ over SMB; effective access is their intersection.
 
 | Edge Type | Share right required | NTFS right required |
 |-----------|---------------------|---------------------|
-| `CanEffectiveRead` | `CanGenericRead` or `CanGenericAll` | `CanNTFSGenericRead`, `CanNTFSReadData`, or `CanNTFSGenericAll` |
-| `CanEffectiveWrite` | `CanGenericWrite` or `CanGenericAll` | `CanNTFSGenericWrite`, `CanNTFSWriteData`, or `CanNTFSGenericAll` |
-| `CanEffectiveExecute` | `CanGenericExecute` or `CanGenericAll` | `CanNTFSGenericExecute`, `CanNTFSExecute`, or `CanNTFSGenericAll` |
+| `CanEffectiveRead` | `CanShareRead`, `CanGenericRead`, or `CanGenericAll` | `CanNTFSGenericRead`, `CanNTFSReadData`, or `CanNTFSGenericAll` |
+| `CanEffectiveWrite` | `CanShareWrite`, `CanGenericWrite`, or `CanGenericAll` | `CanNTFSGenericWrite`, `CanNTFSWriteData`, or `CanNTFSGenericAll` |
+| `CanEffectiveExecute` | `CanShareExecute`, `CanGenericExecute`, or `CanGenericAll` | `CanNTFSGenericExecute`, `CanNTFSExecute`, or `CanNTFSGenericAll` |
 
 > **Limitation:** effective edges are per-SID only. If a user inherits share read
 > through a group SID but holds NTFS read under their personal SID (or vice versa), no
