@@ -44,6 +44,19 @@ const (
 	NTFS_DELETE                 uint32 = 0x00010000
 )
 
+// NTFS object-specific (file/directory) access mask flags
+const (
+	NTFS_FILE_READ_DATA        uint32 = 0x00000001 // FILE_READ_DATA / FILE_LIST_DIRECTORY
+	NTFS_FILE_WRITE_DATA       uint32 = 0x00000002 // FILE_WRITE_DATA / FILE_ADD_FILE
+	NTFS_FILE_APPEND_DATA      uint32 = 0x00000004 // FILE_APPEND_DATA / FILE_ADD_SUBDIRECTORY
+	NTFS_FILE_READ_EA          uint32 = 0x00000008 // FILE_READ_EA
+	NTFS_FILE_WRITE_EA         uint32 = 0x00000010 // FILE_WRITE_EA
+	NTFS_FILE_EXECUTE          uint32 = 0x00000020 // FILE_EXECUTE / FILE_TRAVERSE
+	NTFS_FILE_DELETE_CHILD     uint32 = 0x00000040 // FILE_DELETE_CHILD
+	NTFS_FILE_READ_ATTRIBUTES  uint32 = 0x00000080 // FILE_READ_ATTRIBUTES
+	NTFS_FILE_WRITE_ATTRIBUTES uint32 = 0x00000100 // FILE_WRITE_ATTRIBUTES
+)
+
 // ShareRightsMapping maps edge kinds to share-level access mask flags.
 var ShareRightsMapping = map[string]uint32{
 	kinds.EdgeKindCanDsCreateChild:             DS_CREATE_CHILD,
@@ -78,6 +91,16 @@ var NTFSRightsMapping = map[string]uint32{
 	kinds.EdgeKindCanNTFSWriteDacl:            NTFS_WRITE_DACL,
 	kinds.EdgeKindCanNTFSReadControl:          NTFS_READ_CONTROL,
 	kinds.EdgeKindCanNTFSDelete:               NTFS_DELETE,
+	// Object-specific (file/directory) rights
+	kinds.EdgeKindCanNTFSReadData:        NTFS_FILE_READ_DATA,
+	kinds.EdgeKindCanNTFSWriteData:       NTFS_FILE_WRITE_DATA,
+	kinds.EdgeKindCanNTFSAppendData:      NTFS_FILE_APPEND_DATA,
+	kinds.EdgeKindCanNTFSReadEA:          NTFS_FILE_READ_EA,
+	kinds.EdgeKindCanNTFSWriteEA:         NTFS_FILE_WRITE_EA,
+	kinds.EdgeKindCanNTFSExecute:         NTFS_FILE_EXECUTE,
+	kinds.EdgeKindCanNTFSDeleteChild:     NTFS_FILE_DELETE_CHILD,
+	kinds.EdgeKindCanNTFSReadAttributes:  NTFS_FILE_READ_ATTRIBUTES,
+	kinds.EdgeKindCanNTFSWriteAttributes: NTFS_FILE_WRITE_ATTRIBUTES,
 }
 
 // GetShareRightsForMask returns the edge kinds for a given access mask using share-level mapping.
@@ -132,9 +155,9 @@ func ComputeEffectiveRights(shareKinds, ntfsKinds []string) []string {
 	writeShare := hasAny(shareKinds, kinds.EdgeKindCanGenericWrite, kinds.EdgeKindCanGenericAll)
 	execShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericExecute, kinds.EdgeKindCanGenericAll)
 
-	readNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericRead, kinds.EdgeKindCanNTFSGenericAll)
-	writeNTFS := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericWrite, kinds.EdgeKindCanNTFSGenericAll)
-	execNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericExecute, kinds.EdgeKindCanNTFSGenericAll)
+	readNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericRead, kinds.EdgeKindCanNTFSGenericAll, kinds.EdgeKindCanNTFSReadData)
+	writeNTFS := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericWrite, kinds.EdgeKindCanNTFSGenericAll, kinds.EdgeKindCanNTFSWriteData)
+	execNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericExecute, kinds.EdgeKindCanNTFSGenericAll, kinds.EdgeKindCanNTFSExecute)
 
 	var effective []string
 	if readShare && readNTFS {
