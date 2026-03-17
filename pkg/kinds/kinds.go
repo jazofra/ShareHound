@@ -76,6 +76,19 @@ const (
 	EdgeKindCanNTFSDelete               = "CanNTFSDelete"
 )
 
+// NTFS-level object-specific (file/directory) permission edge kinds
+const (
+	EdgeKindCanNTFSReadData        = "CanNTFSReadData"        // FILE_READ_DATA / FILE_LIST_DIRECTORY
+	EdgeKindCanNTFSWriteData       = "CanNTFSWriteData"       // FILE_WRITE_DATA / FILE_ADD_FILE
+	EdgeKindCanNTFSAppendData      = "CanNTFSAppendData"      // FILE_APPEND_DATA / FILE_ADD_SUBDIRECTORY
+	EdgeKindCanNTFSReadEA          = "CanNTFSReadEA"          // FILE_READ_EA
+	EdgeKindCanNTFSWriteEA         = "CanNTFSWriteEA"         // FILE_WRITE_EA
+	EdgeKindCanNTFSExecute         = "CanNTFSExecute"         // FILE_EXECUTE / FILE_TRAVERSE
+	EdgeKindCanNTFSDeleteChild     = "CanNTFSDeleteChild"     // FILE_DELETE_CHILD
+	EdgeKindCanNTFSReadAttributes  = "CanNTFSReadAttributes"  // FILE_READ_ATTRIBUTES
+	EdgeKindCanNTFSWriteAttributes = "CanNTFSWriteAttributes" // FILE_WRITE_ATTRIBUTES
+)
+
 // Effective access edge kinds — intersection of share-level and NTFS-level generic rights
 // for the same SID. Represents what a principal can actually do when accessing a file
 // over SMB (both permission layers must allow the operation).
@@ -127,6 +140,17 @@ var EdgeDescriptions = map[string]string{
 	EdgeKindCanNTFSWriteDacl:            "NTFS DACL grants WRITE_DAC, allowing the principal to modify the NTFS DACL (change permissions).",
 	EdgeKindCanNTFSReadControl:          "NTFS DACL grants READ_CONTROL, allowing the principal to read the NTFS security descriptor.",
 	EdgeKindCanNTFSDelete:               "NTFS DACL grants DELETE, allowing the principal to delete the file or directory.",
+
+	// NTFS-level object-specific (file/directory) permission edges
+	EdgeKindCanNTFSReadData:        "NTFS DACL grants FILE_READ_DATA (FILE_LIST_DIRECTORY), allowing the principal to read file contents or list directory entries.",
+	EdgeKindCanNTFSWriteData:       "NTFS DACL grants FILE_WRITE_DATA (FILE_ADD_FILE), allowing the principal to write data to a file or create files in a directory.",
+	EdgeKindCanNTFSAppendData:      "NTFS DACL grants FILE_APPEND_DATA (FILE_ADD_SUBDIRECTORY), allowing the principal to append data to a file or create subdirectories.",
+	EdgeKindCanNTFSReadEA:          "NTFS DACL grants FILE_READ_EA, allowing the principal to read extended attributes of the file or directory.",
+	EdgeKindCanNTFSWriteEA:         "NTFS DACL grants FILE_WRITE_EA, allowing the principal to write extended attributes of the file or directory.",
+	EdgeKindCanNTFSExecute:         "NTFS DACL grants FILE_EXECUTE (FILE_TRAVERSE), allowing the principal to execute a file or traverse a directory.",
+	EdgeKindCanNTFSDeleteChild:     "NTFS DACL grants FILE_DELETE_CHILD, allowing the principal to delete child objects within the directory.",
+	EdgeKindCanNTFSReadAttributes:  "NTFS DACL grants FILE_READ_ATTRIBUTES, allowing the principal to read basic attributes of the file or directory.",
+	EdgeKindCanNTFSWriteAttributes: "NTFS DACL grants FILE_WRITE_ATTRIBUTES, allowing the principal to modify basic attributes of the file or directory.",
 
 	// Effective access edges
 	EdgeKindCanEffectiveRead:    "The principal can read this file or directory over SMB. Both the share-level and NTFS DACLs grant read access for this SID.",
@@ -188,6 +212,16 @@ func AllEdgeKinds() []string {
 		EdgeKindCanNTFSWriteDacl,
 		EdgeKindCanNTFSReadControl,
 		EdgeKindCanNTFSDelete,
+		// NTFS-level object-specific
+		EdgeKindCanNTFSReadData,
+		EdgeKindCanNTFSWriteData,
+		EdgeKindCanNTFSAppendData,
+		EdgeKindCanNTFSReadEA,
+		EdgeKindCanNTFSWriteEA,
+		EdgeKindCanNTFSExecute,
+		EdgeKindCanNTFSDeleteChild,
+		EdgeKindCanNTFSReadAttributes,
+		EdgeKindCanNTFSWriteAttributes,
 		// Effective access (intersection of share-level and NTFS-level)
 		EdgeKindCanEffectiveRead,
 		EdgeKindCanEffectiveWrite,

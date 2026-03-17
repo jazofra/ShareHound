@@ -126,6 +126,95 @@ func TestParseSecurityDescriptorUnusualRevision(t *testing.T) {
 	}
 }
 
+func TestGetNTFSRightsForMaskObjectSpecific(t *testing.T) {
+	// Mask with all 9 object-specific rights set (bits 0-8)
+	mask := uint32(0x000001FF)
+	rights := GetNTFSRightsForMask(mask)
+
+	expected := map[string]bool{
+		"CanNTFSReadData":        false,
+		"CanNTFSWriteData":       false,
+		"CanNTFSAppendData":      false,
+		"CanNTFSReadEA":          false,
+		"CanNTFSWriteEA":         false,
+		"CanNTFSExecute":         false,
+		"CanNTFSDeleteChild":     false,
+		"CanNTFSReadAttributes":  false,
+		"CanNTFSWriteAttributes": false,
+	}
+
+	for _, r := range rights {
+		if _, ok := expected[r]; ok {
+			expected[r] = true
+		}
+	}
+
+	for kind, found := range expected {
+		if !found {
+			t.Errorf("Expected %s in rights for mask 0x%08x, but it was missing", kind, mask)
+		}
+	}
+}
+
+func TestGetNTFSRightsForMaskSingleBits(t *testing.T) {
+	tests := []struct {
+		mask     uint32
+		expected string
+	}{
+		{0x00000001, "CanNTFSReadData"},
+		{0x00000002, "CanNTFSWriteData"},
+		{0x00000004, "CanNTFSAppendData"},
+		{0x00000008, "CanNTFSReadEA"},
+		{0x00000010, "CanNTFSWriteEA"},
+		{0x00000020, "CanNTFSExecute"},
+		{0x00000040, "CanNTFSDeleteChild"},
+		{0x00000080, "CanNTFSReadAttributes"},
+		{0x00000100, "CanNTFSWriteAttributes"},
+	}
+
+	for _, tt := range tests {
+		rights := GetNTFSRightsForMask(tt.mask)
+		found := false
+		for _, r := range rights {
+			if r == tt.expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected %s for mask 0x%08x, got %v", tt.expected, tt.mask, rights)
+		}
+		if len(rights) != 1 {
+			t.Errorf("Expected exactly 1 right for mask 0x%08x, got %d: %v", tt.mask, len(rights), rights)
+		}
+	}
+}
+
+func TestComputeEffectiveRightsWithGranularNTFS(t *testing.T) {
+	// Test that granular NTFS permissions (e.g., FILE_READ_DATA) contribute to effective rights
+	shareKinds := []string{"CanGenericRead", "CanGenericWrite", "CanGenericExecute"}
+
+	// Only granular NTFS rights, no generic
+	ntfsKinds := []string{"CanNTFSReadData", "CanNTFSWriteData", "CanNTFSExecute"}
+
+	effective := ComputeEffectiveRights(shareKinds, ntfsKinds)
+
+	expectedSet := map[string]bool{
+		"CanEffectiveRead":    false,
+		"CanEffectiveWrite":   false,
+		"CanEffectiveExecute": false,
+	}
+	for _, e := range effective {
+		expectedSet[e] = true
+	}
+
+	for kind, found := range expectedSet {
+		if !found {
+			t.Errorf("Expected %s in effective rights when granular NTFS permissions are set", kind)
+		}
+	}
+}
+
 func TestParseSecurityDescriptorNoDACL(t *testing.T) {
 	// Test SD without DACL
 	sdNoDACL := []byte{
