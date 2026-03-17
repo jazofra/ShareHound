@@ -306,7 +306,7 @@ To output uncompressed JSON, use a `.json` extension:
 | `User` | A user principal |
 | `Group` | A group principal |
 
-### Edge Types (31 total)
+### Edge Types (42 total)
 
 #### Containment Edges (3)
 | Edge Type | Description |
@@ -340,18 +340,32 @@ To output uncompressed JSON, use a `.json` extension:
 - `CanWriteDacl` - Modify DACL
 - `CanWriteOwner` - Take ownership
 
-#### NTFS-Level Permission Edges (11)
-- `CanNTFSGenericRead` - NTFS generic read
-- `CanNTFSGenericWrite` - NTFS generic write
-- `CanNTFSGenericExecute` - NTFS generic execute
-- `CanNTFSGenericAll` - NTFS full control
-- `CanNTFSMaximumAllowed` - Maximum allowed access
-- `CanNTFSAccessSystemSecurity` - Access system security
-- `CanNTFSSynchronize` - Synchronize access
-- `CanNTFSWriteOwner` - NTFS take ownership
-- `CanNTFSWriteDacl` - NTFS modify DACL
-- `CanNTFSReadControl` - NTFS read security descriptor
-- `CanNTFSDelete` - NTFS delete permission
+#### NTFS-Level Permission Edges (19)
+
+**Generic Rights (defensive fallback — rarely stored in on-disk ACEs; Windows maps these to specific rights before writing):**
+- `CanNTFSGenericRead` - GENERIC_READ (0x80000000)
+- `CanNTFSGenericWrite` - GENERIC_WRITE (0x40000000)
+- `CanNTFSGenericExecute` - GENERIC_EXECUTE (0x20000000)
+- `CanNTFSGenericAll` - GENERIC_ALL (0x10000000)
+
+**Standard Rights:**
+- `CanNTFSAccessSystemSecurity` - ACCESS_SYSTEM_SECURITY (0x01000000) — read/modify SACL
+- `CanNTFSSynchronize` - SYNCHRONIZE (0x00100000)
+- `CanNTFSWriteOwner` - WRITE_OWNER (0x00080000) — take ownership
+- `CanNTFSWriteDacl` - WRITE_DAC (0x00040000) — change permissions
+- `CanNTFSReadControl` - READ_CONTROL (0x00020000) — read security descriptor
+- `CanNTFSDelete` - DELETE (0x00010000)
+
+**Object-Specific (File/Directory) Rights:**
+- `CanNTFSReadData` - Read file contents / list directory (FILE_READ_DATA)
+- `CanNTFSWriteData` - Write file data / create files in directory (FILE_WRITE_DATA)
+- `CanNTFSAppendData` - Append data / create subdirectories (FILE_APPEND_DATA)
+- `CanNTFSReadEA` - Read extended attributes (FILE_READ_EA)
+- `CanNTFSWriteEA` - Write extended attributes (FILE_WRITE_EA)
+- `CanNTFSExecute` - Execute file / traverse directory (FILE_EXECUTE)
+- `CanNTFSDeleteChild` - Delete child objects in directory (FILE_DELETE_CHILD)
+- `CanNTFSReadAttributes` - Read basic attributes (FILE_READ_ATTRIBUTES)
+- `CanNTFSWriteAttributes` - Write basic attributes (FILE_WRITE_ATTRIBUTES)
 
 #### Effective Access Edges (3)
 
@@ -361,9 +375,9 @@ over SMB; effective access is their intersection.
 
 | Edge Type | Share right required | NTFS right required |
 |-----------|---------------------|---------------------|
-| `CanEffectiveRead` | `CanGenericRead` or `CanGenericAll` | `CanNTFSGenericRead` or `CanNTFSGenericAll` |
-| `CanEffectiveWrite` | `CanGenericWrite` or `CanGenericAll` | `CanNTFSGenericWrite` or `CanNTFSGenericAll` |
-| `CanEffectiveExecute` | `CanGenericExecute` or `CanGenericAll` | `CanNTFSGenericExecute` or `CanNTFSGenericAll` |
+| `CanEffectiveRead` | `CanGenericRead` or `CanGenericAll` | `CanNTFSGenericRead`, `CanNTFSReadData`, or `CanNTFSGenericAll` |
+| `CanEffectiveWrite` | `CanGenericWrite` or `CanGenericAll` | `CanNTFSGenericWrite`, `CanNTFSWriteData`, or `CanNTFSGenericAll` |
+| `CanEffectiveExecute` | `CanGenericExecute` or `CanGenericAll` | `CanNTFSGenericExecute`, `CanNTFSExecute`, or `CanNTFSGenericAll` |
 
 > **Limitation:** effective edges are per-SID only. If a user inherits share read
 > through a group SID but holds NTFS read under their personal SID (or vice versa), no
@@ -551,6 +565,36 @@ RETURN p
 ```cypher
 MATCH p=(u:User)-[r]->(s:NetworkShareSMB)
 WHERE u.name = "jsmith"
+RETURN p
+```
+
+### Find files/directories with NTFS write permissions (object-specific)
+
+```cypher
+MATCH p=(principal)-[r:CanNTFSWriteData|CanNTFSAppendData|CanNTFSWriteAttributes|CanNTFSWriteEA]->(target)
+WHERE target:File OR target:Directory
+RETURN p
+```
+
+### Find files a principal can effectively read (share + NTFS intersection)
+
+```cypher
+MATCH p=(principal)-[:CanEffectiveRead]->(f:File)
+RETURN p
+```
+
+### Find directories where a principal can effectively write
+
+```cypher
+MATCH p=(principal)-[:CanEffectiveWrite]->(d:Directory)
+RETURN p
+```
+
+### Find principals who can change NTFS permissions or take ownership
+
+```cypher
+MATCH p=(principal)-[r:CanNTFSWriteDacl|CanNTFSWriteOwner]->(target)
+WHERE target:File OR target:Directory
 RETURN p
 ```
 
