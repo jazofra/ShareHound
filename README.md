@@ -306,7 +306,7 @@ To output uncompressed JSON, use a `.json` extension:
 | `User` | A user principal |
 | `Group` | A group principal |
 
-### Edge Types (39 total)
+### Edge Types (42 total)
 
 #### Containment Edges (3)
 | Edge Type | Description |
@@ -565,6 +565,36 @@ RETURN p
 ```cypher
 MATCH p=(u:User)-[r]->(s:NetworkShareSMB)
 WHERE u.name = "jsmith"
+RETURN p
+```
+
+### Find files/directories with NTFS write permissions (object-specific)
+
+```cypher
+MATCH p=(principal)-[r:CanNTFSWriteData|CanNTFSAppendData|CanNTFSWriteAttributes|CanNTFSWriteEA]->(target)
+WHERE target:File OR target:Directory
+RETURN p
+```
+
+### Find files a principal can effectively read (share + NTFS intersection)
+
+```cypher
+MATCH p=(principal)-[:CanEffectiveRead]->(f:File)
+RETURN p
+```
+
+### Find directories where a principal can effectively write
+
+```cypher
+MATCH p=(principal)-[:CanEffectiveWrite]->(d:Directory)
+RETURN p
+```
+
+### Find principals who can change NTFS permissions or take ownership
+
+```cypher
+MATCH p=(principal)-[r:CanNTFSWriteDacl|CanNTFSWriteOwner]->(target)
+WHERE target:File OR target:Directory
 RETURN p
 ```
 
