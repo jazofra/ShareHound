@@ -402,6 +402,12 @@ func processShare(
 	}
 	ogc.SetShareRights(shareRights)
 
+	// Collect NTFS rights for the share root directory.
+	// These serve as a fallback for first-level files whose individual
+	// security descriptors cannot be retrieved over SMB.
+	shareRootNTFS, _ := collector.CollectNTFSRights(conn, ogc, "", taskLog)
+	ogc.SetShareRootNTFSRights(shareRootNTFS)
+
 	// Check if share should be processed
 	if rulesEval.CanProcess(ruleShare) {
 		ogc.AddPathToGraph()
