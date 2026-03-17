@@ -27,6 +27,15 @@ const (
 	GENERIC_EXECUTE uint32 = 0x20000000
 	GENERIC_WRITE   uint32 = 0x40000000
 	GENERIC_READ    uint32 = 0x80000000
+
+	// File-specific rights at the share level.
+	// Windows share permissions (Read/Change/Full Control) use these specific
+	// bits rather than the GENERIC_* flags. For example, the standard "Read"
+	// share permission uses mask 0x001200A9 which sets SHARE_FILE_READ_DATA
+	// (0x1) but NOT GENERIC_READ (0x80000000).
+	SHARE_FILE_READ_DATA uint32 = 0x00000001 // FILE_READ_DATA at share level
+	SHARE_FILE_WRITE_DATA uint32 = 0x00000002 // FILE_WRITE_DATA at share level
+	SHARE_FILE_EXECUTE    uint32 = 0x00000020 // FILE_EXECUTE at share level
 )
 
 // NTFS-level access mask flags
@@ -75,6 +84,13 @@ var ShareRightsMapping = map[string]uint32{
 	kinds.EdgeKindCanGenericExecute:            GENERIC_EXECUTE,
 	kinds.EdgeKindCanGenericWrite:              GENERIC_WRITE,
 	kinds.EdgeKindCanGenericRead:               GENERIC_READ,
+	// File-specific share rights — these bits overlap with DS_* constants but
+	// have different semantics for file shares.  Both edge kinds are emitted
+	// when the bit is set so that ComputeEffectiveRights can detect the
+	// standard Windows share permissions (Read/Change/Full Control).
+	kinds.EdgeKindCanShareRead:                 SHARE_FILE_READ_DATA,
+	kinds.EdgeKindCanShareWrite:                SHARE_FILE_WRITE_DATA,
+	kinds.EdgeKindCanShareExecute:              SHARE_FILE_EXECUTE,
 }
 
 // NTFSRightsMapping maps edge kinds to NTFS-level access mask flags.
@@ -142,16 +158,18 @@ func hasAny(edgeKinds []string, targets ...string) bool {
 // checked first, then the NTFS DACL.  A principal needs permission at both layers to
 // perform an operation, so effective access = shareRights ∩ ntfsRights.
 //
-// Only the four generic right categories (Read / Write / Execute / All) are considered
-// because the DS_* share rights have no direct NTFS counterpart.
+// Both generic rights (GENERIC_READ, etc.) and file-specific rights (FILE_READ_DATA,
+// etc.) are checked at the share level, because Windows share permissions typically
+// use specific rights rather than generic flags.  The DS_* share rights have no
+// direct NTFS counterpart and are not considered.
 //
 // Note: this is per-SID only.  Group memberships are not resolved here — a user who
 // inherits share read through a group and has NTFS read directly will not receive an
 // effective edge unless both ACEs reference the same SID.
 func ComputeEffectiveRights(shareKinds, ntfsKinds []string) []string {
-	readShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericRead, kinds.EdgeKindCanGenericAll)
-	writeShare := hasAny(shareKinds, kinds.EdgeKindCanGenericWrite, kinds.EdgeKindCanGenericAll)
-	execShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericExecute, kinds.EdgeKindCanGenericAll)
+	readShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericRead, kinds.EdgeKindCanGenericAll, kinds.EdgeKindCanShareRead)
+	writeShare := hasAny(shareKinds, kinds.EdgeKindCanGenericWrite, kinds.EdgeKindCanGenericAll, kinds.EdgeKindCanShareWrite)
+	execShare  := hasAny(shareKinds, kinds.EdgeKindCanGenericExecute, kinds.EdgeKindCanGenericAll, kinds.EdgeKindCanShareExecute)
 
 	readNTFS  := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericRead, kinds.EdgeKindCanNTFSGenericAll, kinds.EdgeKindCanNTFSReadData)
 	writeNTFS := hasAny(ntfsKinds, kinds.EdgeKindCanNTFSGenericWrite, kinds.EdgeKindCanNTFSGenericAll, kinds.EdgeKindCanNTFSWriteData)

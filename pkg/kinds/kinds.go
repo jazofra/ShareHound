@@ -61,6 +61,17 @@ const (
 	EdgeKindCanWriteOwner  = "CanWriteOwner"
 )
 
+// Share-level permission edge kinds - File-specific rights
+// These correspond to the specific access bits (FILE_READ_DATA, FILE_WRITE_DATA,
+// FILE_EXECUTE) that Windows uses in share DACLs instead of generic flags.
+// A typical share "Read" permission uses mask 0x001200A9 which has FILE_READ_DATA
+// (0x1) set but NOT GENERIC_READ (0x80000000).
+const (
+	EdgeKindCanShareRead    = "CanShareRead"    // FILE_READ_DATA (0x00000001) at share level
+	EdgeKindCanShareWrite   = "CanShareWrite"   // FILE_WRITE_DATA (0x00000002) at share level
+	EdgeKindCanShareExecute = "CanShareExecute" // FILE_EXECUTE (0x00000020) at share level
+)
+
 // NTFS-level permission edge kinds
 const (
 	EdgeKindCanNTFSGenericRead          = "CanNTFSGenericRead"
@@ -126,6 +137,11 @@ var EdgeDescriptions = map[string]string{
 	EdgeKindCanReadControl: "Share-level DACL grants READ_CONTROL, allowing the principal to read the security descriptor.",
 	EdgeKindCanWriteDacl:   "Share-level DACL grants WRITE_DAC, allowing the principal to modify the DACL (change permissions).",
 	EdgeKindCanWriteOwner:  "Share-level DACL grants WRITE_OWNER, allowing the principal to change the object owner.",
+
+	// Share-level file-specific rights
+	EdgeKindCanShareRead:    "Share-level DACL grants FILE_READ_DATA (0x00000001). This is the specific read bit used by standard Windows share permissions (Read = 0x001200A9, Change, Full Control).",
+	EdgeKindCanShareWrite:   "Share-level DACL grants FILE_WRITE_DATA (0x00000002). This is the specific write bit used by standard Windows share permissions (Change = 0x001301BF, Full Control).",
+	EdgeKindCanShareExecute: "Share-level DACL grants FILE_EXECUTE (0x00000020). This is the specific execute/traverse bit used by standard Windows share permissions.",
 
 	// NTFS-level permission edges
 	EdgeKindCanNTFSGenericRead:          "NTFS DACL grants GENERIC_READ (0x80000000). Rarely stored in on-disk ACEs — Windows normally maps this to specific rights (FILE_READ_DATA | FILE_READ_ATTRIBUTES | FILE_READ_EA | READ_CONTROL | SYNCHRONIZE) before writing. Kept as a defensive fallback.",
@@ -198,6 +214,10 @@ func AllEdgeKinds() []string {
 		EdgeKindCanReadControl,
 		EdgeKindCanWriteDacl,
 		EdgeKindCanWriteOwner,
+		// Share-level file-specific
+		EdgeKindCanShareRead,
+		EdgeKindCanShareWrite,
+		EdgeKindCanShareExecute,
 		// NTFS-level
 		EdgeKindCanNTFSGenericRead,
 		EdgeKindCanNTFSGenericWrite,
