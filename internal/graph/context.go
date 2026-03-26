@@ -34,6 +34,7 @@ type OpenGraphContext struct {
 	hostShareEmitted     bool                // true once host+share+share-rights have been added to graph
 	emittedPathNodes     map[string]struct{} // directory node IDs already committed (edges + rights)
 	domainSuffix         string              // domain FQDN used to prefix non-domain SIDs (e.g. "THIS.DOMAIN.COM")
+	effectiveAccessOnly  bool                // when true, skip granular NTFS rights edges for files/directories
 }
 
 // NewOpenGraphContext creates a new OpenGraphContext.
@@ -67,6 +68,12 @@ func (c *OpenGraphContext) SetDomainSuffix(domain string) {
 // GetDomainSuffix returns the domain suffix.
 func (c *OpenGraphContext) GetDomainSuffix() string {
 	return c.domainSuffix
+}
+
+// SetEffectiveAccessOnly controls whether granular NTFS rights edges for files
+// and directories are suppressed, keeping only CanEffectiveRead/Write/Execute.
+func (c *OpenGraphContext) SetEffectiveAccessOnly(v bool) {
+	c.effectiveAccessOnly = v
 }
 
 // SetShare sets the share node.
@@ -252,7 +259,9 @@ func (c *OpenGraphContext) AddPathToGraph() {
 			c.emittedPathNodes[entry.Node.ID] = struct{}{}
 
 			c.graph.AddNodeWithoutValidation(entry.Node)
-			c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory", kinds.NodeKindDirectory)
+			if !c.effectiveAccessOnly {
+				c.AddRightsToGraph(entry.Node.ID, entry.Rights, "directory", kinds.NodeKindDirectory)
+			}
 			c.AddEffectiveRightsToGraph(entry.Node.ID, entry.Rights, kinds.NodeKindDirectory)
 
 			containsEdge := NewEdge(parentID, entry.Node.ID, kinds.EdgeKindContains)
@@ -278,7 +287,9 @@ func (c *OpenGraphContext) AddPathToGraph() {
 	}
 
 	c.graph.AddNodeWithoutValidation(c.element)
-	c.AddRightsToGraph(c.element.ID, c.elementRights, "file", c.element.Kinds[0])
+	if !c.effectiveAccessOnly {
+		c.AddRightsToGraph(c.element.ID, c.elementRights, "file", c.element.Kinds[0])
+	}
 	c.AddEffectiveRightsToGraph(c.element.ID, c.elementRights, c.element.Kinds[0])
 
 	elementEdge := NewEdge(parentID, c.element.ID, kinds.EdgeKindContains)

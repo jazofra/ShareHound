@@ -25,15 +25,16 @@ import (
 
 // Options holds worker configuration options.
 type Options struct {
-	Creds             *credentials.Credentials
-	Timeout           time.Duration
-	HostTimeout       time.Duration
-	AdvertisedName    string
-	MaxWorkersPerHost int
-	GlobalMaxWorkers  int
-	Depth             int
-	Nameserver        string
-	Logfile           string
+	Creds               *credentials.Credentials
+	Timeout             time.Duration
+	HostTimeout         time.Duration
+	AdvertisedName      string
+	MaxWorkersPerHost   int
+	GlobalMaxWorkers    int
+	Depth               int
+	Nameserver          string
+	Logfile             string
+	EffectiveAccessOnly bool
 }
 
 // ProcessTarget processes a single target host.
@@ -362,6 +363,7 @@ func processShare(
 
 	// Create OpenGraph context
 	ogc := graph.NewOpenGraphContext(og, taskLog)
+	ogc.SetEffectiveAccessOnly(opts.EffectiveAccessOnly)
 
 	// Extract domain from FQDN (e.g. "server.corp.com" -> "CORP.COM")
 	// and set it on the context so well-known SIDs get domain-prefixed.

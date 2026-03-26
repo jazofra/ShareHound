@@ -76,6 +76,9 @@ var (
 	checkpointFile     string
 	checkpointInterval float64
 	resume             bool
+
+	// Output filtering
+	effectiveAccessOnly bool
 )
 
 func main() {
@@ -131,6 +134,9 @@ creating a BloodHound-compatible OpenGraph for security analysis.`,
 	rootCmd.Flags().StringVar(&checkpointFile, "checkpoint", "", "Checkpoint file for resumable scans")
 	rootCmd.Flags().Float64Var(&checkpointInterval, "checkpoint-interval", 60, "Checkpoint save interval in seconds")
 	rootCmd.Flags().BoolVar(&resume, "resume", false, "Resume from existing checkpoint file")
+
+	// Output filtering
+	rootCmd.Flags().BoolVar(&effectiveAccessOnly, "effective-access-only", false, "Only emit CanEffectiveRead/Write/Execute edges for files and directories (reduces edge count)")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -281,15 +287,16 @@ func run(cmd *cobra.Command, args []string) {
 
 	// Create worker options
 	workerOpts := &worker.Options{
-		Creds:             creds,
-		Timeout:           time.Duration(timeout * float64(time.Second)),
-		HostTimeout:       time.Duration(hostTimeout * float64(time.Minute)),
-		AdvertisedName:    advertisedName,
-		MaxWorkersPerHost: maxWorkersPerHost,
-		GlobalMaxWorkers:  globalMaxWorkers,
-		Depth:             depth,
-		Nameserver:        nameserver,
-		Logfile:           logfile,
+		Creds:               creds,
+		Timeout:             time.Duration(timeout * float64(time.Second)),
+		HostTimeout:         time.Duration(hostTimeout * float64(time.Minute)),
+		AdvertisedName:      advertisedName,
+		MaxWorkersPerHost:   maxWorkersPerHost,
+		GlobalMaxWorkers:    globalMaxWorkers,
+		Depth:               depth,
+		Nameserver:          nameserver,
+		Logfile:             logfile,
+		EffectiveAccessOnly: effectiveAccessOnly,
 	}
 
 	// Debug: show host timeout value
