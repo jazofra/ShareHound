@@ -17,6 +17,7 @@ A tool that maps network share access rights into BloodHound OpenGraph format fo
 - NTLM, Kerberos, and pass-the-hash authentication
 - CIDR range and target file support
 - **Resumable scans** with checkpoint support
+- **`--effective-access-only` mode** to drastically reduce graph size on large environments
 - Cross-platform builds (Linux, Windows, macOS)
 
 ## Installation
@@ -138,6 +139,11 @@ Download from the [Releases](https://github.com/specterops/sharehound/releases) 
 | `--debug` | Debug mode | false |
 | `--no-colors` | Disable ANSI escape codes | false |
 
+### Output Filtering
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--effective-access-only` | Only emit `CanEffectiveRead`/`CanEffectiveWrite`/`CanEffectiveExecute` edges for files and directories | false |
+
 ### Checkpoint/Resume
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -244,6 +250,43 @@ This is essential for large scans where some hosts may be unresponsive or have e
   --auth-password <PASS>
 ```
 
+### Reducing Graph Size with `--effective-access-only`
+
+On large environments, the full permission model can produce an overwhelming number of
+edges. Every file and directory emits raw NTFS rights edges for each ACE in its DACL —
+typically 5-15 edges per node per SID. For a share with 100,000 files and 20 ACEs per
+file, that can be **2 million+ edges** before even considering directories.
+
+The `--effective-access-only` flag suppresses all granular NTFS rights edges for File
+and Directory nodes, keeping only the three computed effective access edges:
+`CanEffectiveRead`, `CanEffectiveWrite`, and `CanEffectiveExecute`. These represent the
+**real-world access** a principal has — the intersection of share-level and NTFS-level
+permissions — which is what matters for attack-path analysis.
+
+**What is kept:**
+- All structural edges: `HostsNetworkShare`, `HasNetworkShare`, `Contains`
+- Share-level rights on the share node itself (for share-boundary analysis)
+- `CanEffectiveRead`, `CanEffectiveWrite`, `CanEffectiveExecute` on files and directories
+
+**What is suppressed** (for File and Directory nodes only):
+- All `CanNTFS*` edges (raw NTFS permission details)
+- All `CanGeneric*`, `CanShare*`, `CanDs*`, `CanDelete`, `CanReadControl`, etc. on files/dirs
+
+```bash
+# Large enterprise scan with reduced graph size
+./sharehound \
+  --effective-access-only \
+  --threads 128 \
+  --max-workers-per-host 4 \
+  --host-timeout 3 \
+  --checkpoint sharehound.checkpoint \
+  -o results.zip \
+  --auth-dc-ip <DC_IP> \
+  --auth-domain <DOMAIN> \
+  --auth-user <USER> \
+  --auth-password <PASS>
+```
+
 ### Performance Tips
 
 1. **Always use `--host-timeout`** for large scans (2-5 minutes recommended)
@@ -252,6 +295,7 @@ This is essential for large scans where some hosts may be unresponsive or have e
 4. **Use `--depth`** to limit directory traversal if you don't need deep scans
 5. **Enable checkpointing** for large scans to resume if interrupted
 6. **Use ZIP output** (default) - handles millions of edges without memory issues
+7. **Use `--effective-access-only`** on large environments to reduce edge count by 10–20×
 
 ### Target Count Explanation
 
