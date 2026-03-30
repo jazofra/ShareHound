@@ -286,9 +286,22 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		return
 	}
 
+	// If the element is a directory that was already emitted as a path node,
+	// skip re-emission to avoid duplicate nodes and Contains edges.
+	if c.element.Kinds[0] == kinds.NodeKindDirectory {
+		if _, already := c.emittedPathNodes[c.element.ID]; already {
+			return
+		}
+	}
+
 	c.graph.AddNodeWithoutValidation(c.element)
+
+	elementType := "file"
+	if c.element.Kinds[0] == kinds.NodeKindDirectory {
+		elementType = "directory"
+	}
 	if !c.effectiveAccessOnly {
-		c.AddRightsToGraph(c.element.ID, c.elementRights, "file", c.element.Kinds[0])
+		c.AddRightsToGraph(c.element.ID, c.elementRights, elementType, c.element.Kinds[0])
 	}
 	c.AddEffectiveRightsToGraph(c.element.ID, c.elementRights, c.element.Kinds[0])
 
@@ -300,6 +313,12 @@ func (c *OpenGraphContext) AddPathToGraph() {
 	}
 	c.graph.AddEdgeWithoutValidation(elementEdge)
 	c.totalEdgesCreated++
+
+	// Track emitted directory elements so they are not re-emitted
+	// when they later appear as path entries for child files.
+	if c.element.Kinds[0] == kinds.NodeKindDirectory {
+		c.emittedPathNodes[c.element.ID] = struct{}{}
+	}
 
 	if c.logger != nil {
 		c.logger.Debug("[add_path_to_graph] Created edge Contains: " + parentID + " -> " + c.element.ID)
