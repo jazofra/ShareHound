@@ -223,10 +223,12 @@ func collectContentsAtDepth(
 
 			ogc.SetElement(dirNode)
 
-			// Check if directory should be processed (matching Python behavior:
-			// directories are NOT independently added to the graph here.
-			// They are added via the path stack when files inside them are processed.)
+			// Emit directory to the graph immediately upon discovery.
+			// Previously directories were only emitted via the path stack
+			// when files inside them were processed — but with --depth limits,
+			// files inside may never be reached, causing directories to vanish.
 			if rulesEval.CanProcess(ruleDir) {
+				ogc.AddPathToGraph()
 				counts.ProcessedDirectories++
 
 				// Decrement pending
