@@ -377,10 +377,12 @@ func processShare(
 	// cannot collide with the BloodHound Computer node that shares the same
 	// FQDN — both endpoints of the HostsNetworkShare edge would otherwise
 	// resolve to the same node (self-loop → "invalid relationship" in BHE).
-	// The "name" property stays as the plain FQDN for display purposes and
-	// so the HostsNetworkShare edge can look up the Computer node by name.
+	// The "name" property is suffixed with " (Network Share Host)" to avoid
+	// ambiguous name matching during ingestion; the raw FQDN is stored in
+	// the "fqdn" property for edge lookups against the Computer node.
 	hostNode := graph.NewNode("NSHOST:"+strings.ToLower(remoteName), kinds.NodeKindNetworkShareHost).
-		SetProperty("name", remoteName)
+		SetProperty("name", remoteName+" (Network Share Host)").
+		SetProperty("fqdn", remoteName)
 	ogc.SetHost(hostNode)
 
 	// Create share node — use remoteName for UNC path consistency
