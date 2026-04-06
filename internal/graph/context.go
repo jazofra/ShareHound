@@ -207,9 +207,9 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		c.graph.AddNodeWithoutValidation(c.host)
 
 		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost.
-		// Use the "name" property (plain FQDN) for the Computer lookup so it does
+		// Use the "fqdn" property (plain FQDN) for the Computer lookup so it does
 		// not collide with the NetworkShareHost node ID (which carries a prefix).
-		hostName := c.host.GetStringProperty("name")
+		hostName := c.host.GetStringProperty("fqdn")
 		hostEdge := NewEdge(strings.ToUpper(hostName), c.host.ID, kinds.EdgeKindHostsNetworkShare)
 		hostEdge.SetStartMatchBy("name")
 		hostEdge.SetStartKind("Computer")
