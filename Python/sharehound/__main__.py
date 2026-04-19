@@ -13,7 +13,6 @@ from threading import Lock
 
 import argcomplete
 import ldap3.core.exceptions
-from bhopengraph.OpenGraph import OpenGraph
 from rich.console import Console
 from shareql.ast.rule import Rule
 from shareql.grammar.parser import RuleParser
@@ -22,6 +21,7 @@ import sharehound.kinds as kinds
 from sharehound.__version__ import __version__
 from sharehound.core.Config import Config
 from sharehound.core.Logger import Logger
+from sharehound.core.StreamingOpenGraph import StreamingOpenGraph
 from sharehound.status import status
 from sharehound.targets import load_targets
 from sharehound.utils.delta_time import delta_time
@@ -348,13 +348,14 @@ def main():
     logger.info("Starting ShareHound")
     timestamp_start = time.time()
 
-    graph = OpenGraph(source_kind=kinds.node_kind_network_share_base)
+    graph = StreamingOpenGraph(source_kind=kinds.node_kind_network_share_base)
 
     targets = []
     try:
         targets = load_targets(options, config, logger)
     except ldap3.core.exceptions.LDAPSocketOpenError as err:
         logger.error("Failed to connect to the LDAP server: %s" % str(err))
+        graph.close()
         sys.exit(1)
     except Exception as err:
         logger.error("Failed to load targets: %s" % str(err))
@@ -362,6 +363,7 @@ def main():
             import traceback
 
             traceback.print_exc()
+        graph.close()
         sys.exit(1)
     logger.info("Targeting %d hosts" % len(targets))
 
@@ -413,11 +415,14 @@ def main():
     logger.increment_indent()
     logger.info("Nodes: %d" % graph.get_node_count())
     logger.info("Edges: %d" % graph.get_edge_count())
-    graph.export_to_file(outfile, include_metadata=False)
-    logger.info(
-        'Graph successfully exported to "%s" (%s)'
-        % (outfile, filesize(os.path.getsize(outfile)))
-    )
+    try:
+        graph.export_to_file(outfile, include_metadata=False)
+        logger.info(
+            'Graph successfully exported to "%s" (%s)'
+            % (outfile, filesize(os.path.getsize(outfile)))
+        )
+    finally:
+        graph.close()
     logger.decrement_indent()
 
     # Display final summary
