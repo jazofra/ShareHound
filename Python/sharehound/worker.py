@@ -51,67 +51,78 @@ class ConnectionPool:
         logger: Logger,
     ) -> Optional[SMBSession]:
         """Get an available connection for the host, creating one if needed."""
+        # Pop one pooled connection under the lock; do all network I/O outside.
+        pooled = None
         with self._lock:
-            # Try to reuse an existing connection
             if self._connections[host]:
-                connection = self._connections[host].pop()
-                if connection.ping_smb_session():
-                    return connection
-                else:
-                    # Connection is dead, close it
-                    try:
-                        connection.close_smb_session()
-                    except Exception:
-                        pass
-            # Create new connection
-            credentials = Credentials(
-                domain=options.auth_domain,
-                username=options.auth_user,
-                password=options.auth_password,
-                hashes=options.auth_hashes,
-                use_kerberos=options.use_kerberos,
-                aesKey=options.auth_key,
-                kdcHost=options.kdc_host,
-            )
+                pooled = self._connections[host].pop()
 
-            smb_session = SMBSession(
-                host=host,
-                port=445,
-                timeout=10,
-                credentials=credentials,
-                remote_name=remote_name,
-                advertisedName=options.advertised_name,
-                config=config,
-                logger=logger,
-            )
+        if pooled is not None:
+            if pooled.ping_smb_session():
+                return pooled
+            try:
+                pooled.close_smb_session()
+            except Exception:
+                pass
 
-            if smb_session.init_smb_session():
-                return smb_session
-            else:
-                return None
+        # Create a new connection outside the lock so other threads can
+        # continue to pop/push pooled connections while this SMB handshake
+        # is in progress.
+        credentials = Credentials(
+            domain=options.auth_domain,
+            username=options.auth_user,
+            password=options.auth_password,
+            hashes=options.auth_hashes,
+            use_kerberos=options.use_kerberos,
+            aesKey=options.auth_key,
+            kdcHost=options.kdc_host,
+        )
+
+        smb_session = SMBSession(
+            host=host,
+            port=445,
+            timeout=10,
+            credentials=credentials,
+            remote_name=remote_name,
+            advertisedName=options.advertised_name,
+            config=config,
+            logger=logger,
+        )
+
+        if smb_session.init_smb_session():
+            return smb_session
+        return None
 
     def return_connection(self, host: str, connection: SMBSession):
         """Return a connection to the pool for reuse."""
+        should_close = False
         with self._lock:
             if len(self._connections[host]) < self.max_connections_per_host:
                 self._connections[host].append(connection)
             else:
-                # Pool is full, close the connection
-                try:
-                    connection.close_smb_session()
-                except Exception:
-                    pass
+                should_close = True
+
+        if should_close:
+            try:
+                connection.close_smb_session()
+            except Exception:
+                pass
 
     def close_all(self):
         """Close all connections in the pool."""
         with self._lock:
-            for host_connections in self._connections.values():
-                for connection in host_connections:
-                    try:
-                        connection.close_smb_session()
-                    except Exception:
-                        pass
+            connections_to_close = [
+                connection
+                for host_connections in self._connections.values()
+                for connection in host_connections
+            ]
             self._connections.clear()
+
+        for connection in connections_to_close:
+            try:
+                connection.close_smb_session()
+            except Exception:
+                pass
 
 
 def retry_with_exponential_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
