@@ -147,7 +147,7 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
     # Parsing target to filter IP/DNS/CIDR
     for target in targets:
         if is_ipv4_cidr(target):
-            final_targets += [("ip", ip) for ip in expand_cidr(target)]
+            final_targets += [("ipv4", ip) for ip in expand_cidr(target)]
         elif is_ipv4_addr(target):
             final_targets.append(("ipv4", target))
         elif is_ipv6_addr(target):
