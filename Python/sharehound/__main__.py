@@ -71,8 +71,6 @@ def parse_rules(options: argparse.Namespace, logger: Logger) -> list[Rule]:
     elif len(options.rule_string) > 0:
         rules_text = "\n".join(options.rule_string)
         parsed_rules, parsing_errors = rp.parse(rules_text)
-        parsed_rules.extend(parsed_rules)
-        parsing_errors.extend(parsing_errors)
 
     if len(parsing_errors) > 0:
         logger.error("Errors while parsing rules:")
