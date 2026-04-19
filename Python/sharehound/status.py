@@ -7,7 +7,7 @@
 import time
 
 from rich.console import Console
-from rich.progress import Progress, TextColumn
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.text import Text
 
 
@@ -33,8 +33,8 @@ def status(console: Console, worker_results: dict, futures: list):
     # Create custom progress with our column
     custom_progress = Progress(
         TextColumn("{task.description}"),
-        # BarColumn(),
-        # TaskProgressColumn(),
+        BarColumn(),
+        TaskProgressColumn(),
         CustomProgressColumn(""),
         auto_refresh=True,
         refresh_per_second=1,
