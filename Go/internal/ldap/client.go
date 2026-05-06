@@ -3,6 +3,7 @@ package ldap
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"strings"
@@ -108,7 +109,7 @@ func (c *Client) Connect() error {
 
 func (c *Client) bind() error {
 	if c.windowsAuth {
-		gssClient, err := newWindowsGSSAPIClient()
+		gssClient, err := newWindowsGSSAPIClient(c.tlsServerCertificate())
 		if err != nil {
 			return err
 		}
@@ -136,6 +137,17 @@ func (c *Client) bind() error {
 
 	bindDN := fmt.Sprintf("%s@%s", c.username, c.domain)
 	return c.conn.Bind(bindDN, c.password)
+}
+
+func (c *Client) tlsServerCertificate() *x509.Certificate {
+	if !c.useLDAPS || c.conn == nil {
+		return nil
+	}
+	state, ok := c.conn.TLSConnectionState()
+	if !ok || len(state.PeerCertificates) == 0 {
+		return nil
+	}
+	return state.PeerCertificates[0]
 }
 
 func (c *Client) ldapServicePrincipal() string {
