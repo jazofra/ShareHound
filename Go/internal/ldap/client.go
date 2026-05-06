@@ -153,21 +153,22 @@ func (c *Client) GetServers() ([]string, error) {
 	return servers, nil
 }
 
-// hostnameFromEntry returns dNSHostName if set, otherwise builds an FQDN from
-// the bare name attribute by appending the AD domain. Returns "" if neither is
-// available.
+// hostnameFromEntry returns dNSHostName if set, otherwise falls back to the
+// name attribute. If the resulting value is a bare hostname (no dot), the AD
+// domain is appended so the targets loader accepts it as an FQDN. Returns ""
+// if neither attribute is available.
 func (c *Client) hostnameFromEntry(entry *ldap.Entry) string {
-	if dnsName := entry.GetAttributeValue("dNSHostName"); dnsName != "" {
-		return dnsName
+	host := entry.GetAttributeValue("dNSHostName")
+	if host == "" {
+		host = entry.GetAttributeValue("name")
 	}
-	name := entry.GetAttributeValue("name")
-	if name == "" {
+	if host == "" {
 		return ""
 	}
-	if strings.Contains(name, ".") || c.domain == "" {
-		return name
+	if strings.Contains(host, ".") || c.domain == "" {
+		return host
 	}
-	return name + "." + c.domain
+	return host + "." + c.domain
 }
 
 // GetSubnets retrieves subnet objects from AD Sites and Services.
