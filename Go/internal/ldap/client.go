@@ -4,9 +4,13 @@ package ldap
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	ldapgssapi "github.com/go-ldap/ldap/v3/gssapi"
+	"github.com/specterops/sharehound/internal/auth"
+	"github.com/specterops/sharehound/internal/credentials"
 )
 
 // Default page size for LDAP paging (AD default MaxPageSize is 1000)
@@ -14,15 +18,19 @@ const defaultPageSize = 1000
 
 // Client represents an LDAP client for Active Directory.
 type Client struct {
-	conn     *ldap.Conn
-	baseDN   string
-	domain   string
-	dcIP     string
-	username string
-	password string
-	useLDAPS bool
-	useNTLM  bool
-	ntHash   string
+	conn        *ldap.Conn
+	baseDN      string
+	domain      string
+	dcIP        string
+	username    string
+	password    string
+	authKey     string
+	useLDAPS    bool
+	useNTLM     bool
+	ntHash      string
+	useKerberos bool
+	windowsAuth bool
+	kdcHost     string
 }
 
 // ClientOptions holds options for creating an LDAP client.
@@ -32,26 +40,32 @@ type ClientOptions struct {
 	Username    string
 	Password    string
 	Hashes      string // LM:NT format
+	AuthKey     string
 	UseLDAPS    bool
 	UseKerberos bool
+	WindowsAuth bool
 	KDCHost     string
 }
 
 // NewClient creates a new LDAP client.
 func NewClient(opts *ClientOptions) (*Client, error) {
 	client := &Client{
-		domain:   opts.Domain,
-		dcIP:     opts.DCIP,
-		username: opts.Username,
-		password: opts.Password,
-		useLDAPS: opts.UseLDAPS,
+		domain:      opts.Domain,
+		dcIP:        opts.DCIP,
+		username:    opts.Username,
+		password:    opts.Password,
+		authKey:     opts.AuthKey,
+		useLDAPS:    opts.UseLDAPS,
+		useKerberos: opts.UseKerberos,
+		windowsAuth: opts.WindowsAuth,
+		kdcHost:     opts.KDCHost,
 	}
 
 	// Parse hashes if provided
 	if opts.Hashes != "" {
-		parts := strings.Split(opts.Hashes, ":")
-		if len(parts) == 2 {
-			client.ntHash = parts[1]
+		_, ntHash := credentials.ParseLMNTHashes(opts.Hashes)
+		if ntHash != "" {
+			client.ntHash = ntHash
 			client.useNTLM = true
 		}
 	}
@@ -84,14 +98,56 @@ func (c *Client) Connect() error {
 
 	c.conn = conn
 
-	// Bind with credentials
-	bindDN := fmt.Sprintf("%s@%s", c.username, c.domain)
-	if err := c.conn.Bind(bindDN, c.password); err != nil {
+	if err := c.bind(); err != nil {
 		c.conn.Close()
 		return fmt.Errorf("failed to bind to LDAP server: %w", err)
 	}
 
 	return nil
+}
+
+func (c *Client) bind() error {
+	if c.windowsAuth {
+		gssClient, err := newWindowsGSSAPIClient()
+		if err != nil {
+			return err
+		}
+		return c.conn.GSSAPIBind(gssClient, c.ldapServicePrincipal(), "")
+	}
+
+	if c.useKerberos {
+		krbClient, err := auth.NewKerberosClient(auth.KerberosOptions{
+			Domain:     c.domain,
+			Username:   c.username,
+			Password:   c.password,
+			KeytabPath: c.authKey,
+			KDCHost:    c.kdcHost,
+		})
+		if err != nil {
+			return err
+		}
+		gssClient := &ldapgssapi.Client{Client: krbClient}
+		return c.conn.GSSAPIBind(gssClient, c.ldapServicePrincipal(), "")
+	}
+
+	if c.useNTLM {
+		return c.conn.NTLMBindWithHash(c.domain, c.username, c.ntHash)
+	}
+
+	bindDN := fmt.Sprintf("%s@%s", c.username, c.domain)
+	return c.conn.Bind(bindDN, c.password)
+}
+
+func (c *Client) ldapServicePrincipal() string {
+	host := c.dcIP
+	if c.kdcHost != "" && net.ParseIP(host) != nil {
+		host = c.kdcHost
+	} else if net.ParseIP(host) != nil {
+		if names, err := net.LookupAddr(host); err == nil && len(names) > 0 {
+			host = strings.TrimSuffix(names[0], ".")
+		}
+	}
+	return auth.ServicePrincipal("ldap", host)
 }
 
 // Close closes the LDAP connection.
