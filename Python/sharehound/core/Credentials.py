@@ -117,19 +117,15 @@ class Credentials(object):
         """
         Determines if the current credentials can be used for a pass-the-hash attack.
 
-        This method checks if both LM and NT hashes are available and not None. If both hashes are set,
-        it indicates that the credentials may be used for a pass-the-hash attack.
+        This method checks if both LM and NT hashes are populated. If both hashes are
+        set to non-empty values, it indicates that the credentials may be used for a
+        pass-the-hash attack.
 
         Returns:
-            bool: True if both LM and NT hashes are available, False otherwise.
+            bool: True if both LM and NT hashes are populated, False otherwise.
         """
 
-        return bool(
-            (self.nt_hex is not None)
-            and (self.nt_raw is not None)
-            and (self.lm_hex is not None)
-            and (self.lm_raw is not None)
-        )
+        return bool(self.lm_hex and self.nt_hex and self.lm_raw and self.nt_raw)
 
     def __dict__(self):
         return {

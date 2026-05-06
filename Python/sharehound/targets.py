@@ -44,12 +44,22 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
                     "[debug] Loading targets line by line from targets file '%s'"
                     % options.targets_file
                 )
-                f = open(options.targets_file, "r")
-                for line in f.readlines():
-                    targets.append(line.strip())
-                f.close()
+                try:
+                    with open(options.targets_file, "r") as f:
+                        for line in f:
+                            entry = line.strip()
+                            if not entry or entry.startswith("#"):
+                                continue
+                            targets.append(entry)
+                except OSError as err:
+                    logger.error(
+                        "Could not read targets file '%s': %s"
+                        % (options.targets_file, err)
+                    )
             else:
-                print("[!] Could not open targets file '%s'" % options.targets_file)
+                logger.error(
+                    "Targets file '%s' does not exist" % options.targets_file
+                )
 
         # Loading targets from a single --target option
         if len(options.target) != 0:
@@ -133,10 +143,11 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
     targets = sorted(list(set(targets)))
 
     final_targets = []
+    skipped_targets = []
     # Parsing target to filter IP/DNS/CIDR
     for target in targets:
         if is_ipv4_cidr(target):
-            final_targets += [("ip", ip) for ip in expand_cidr(target)]
+            final_targets += [("ipv4", ip) for ip in expand_cidr(target)]
         elif is_ipv4_addr(target):
             final_targets.append(("ipv4", target))
         elif is_ipv6_addr(target):
@@ -144,7 +155,13 @@ def load_targets(options: argparse.Namespace, config: Config, logger: Logger):
         elif is_fqdn(target):
             final_targets.append(("fqdn", target))
         else:
-            logger.debug("[debug] Target '%s' was not added." % target)
+            skipped_targets.append(target)
+
+    if skipped_targets:
+        logger.warning(
+            "Skipped %d target(s) that did not parse as IPv4, IPv6, CIDR, or FQDN: %s"
+            % (len(skipped_targets), ", ".join(repr(t) for t in skipped_targets))
+        )
 
     final_targets = sorted(list(set(final_targets)))
     return final_targets

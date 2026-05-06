@@ -196,22 +196,26 @@ class SMBSession(object):
         """
         Closes the current SMB session by disconnecting the SMB client.
 
-        This method ensures that the SMB client connection is properly closed. It checks if the client is connected
-        and if so, it closes the connection and resets the connection status.
+        Always calls ``self.smbClient.close()`` when an SMB client object
+        is attached, regardless of the cached ``self.connected`` flag, so
+        that connections marked dead by ``ping_smb_session()`` still
+        release their underlying socket and server-side state.
 
         Raises:
-            Exception: If the SMB client is not initialized or if there's an error during the disconnection process.
+            Exception: If the SMB client is not initialized.
         """
 
-        if self.smbClient is not None:
-            if self.connected:
-                self.smbClient.close()
-                self.connected = False
-                self.logger.debug("[+] SMB connection closed successfully.")
-            else:
-                self.logger.debug("[!] No active SMB connection to close.")
-        else:
+        if self.smbClient is None:
             raise Exception("SMB client is not initialized.")
+
+        try:
+            self.smbClient.close()
+        except Exception as err:
+            self.logger.debug(f"[!] Error while closing SMB client: {err}")
+        finally:
+            self.connected = False
+            self.smbClient = None
+            self.logger.debug("[+] SMB connection closed.")
 
     def init_smb_session(self) -> bool:
         """
