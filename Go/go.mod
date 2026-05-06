@@ -34,3 +34,5 @@ require (
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/tools v0.17.0 // indirect
 )
+
+replace github.com/medianexapp/go-smb2 => ./third_party/go-smb2
