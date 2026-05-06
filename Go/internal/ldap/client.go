@@ -119,15 +119,8 @@ func (c *Client) GetComputers() ([]string, error) {
 
 	var computers []string
 	for _, entry := range sr.Entries {
-		// Prefer dNSHostName, fall back to name
-		dnsName := entry.GetAttributeValue("dNSHostName")
-		if dnsName != "" {
-			computers = append(computers, dnsName)
-		} else {
-			name := entry.GetAttributeValue("name")
-			if name != "" {
-				computers = append(computers, name)
-			}
+		if host := c.hostnameFromEntry(entry); host != "" {
+			computers = append(computers, host)
 		}
 	}
 
@@ -152,18 +145,29 @@ func (c *Client) GetServers() ([]string, error) {
 
 	var servers []string
 	for _, entry := range sr.Entries {
-		dnsName := entry.GetAttributeValue("dNSHostName")
-		if dnsName != "" {
-			servers = append(servers, dnsName)
-		} else {
-			name := entry.GetAttributeValue("name")
-			if name != "" {
-				servers = append(servers, name)
-			}
+		if host := c.hostnameFromEntry(entry); host != "" {
+			servers = append(servers, host)
 		}
 	}
 
 	return servers, nil
+}
+
+// hostnameFromEntry returns dNSHostName if set, otherwise builds an FQDN from
+// the bare name attribute by appending the AD domain. Returns "" if neither is
+// available.
+func (c *Client) hostnameFromEntry(entry *ldap.Entry) string {
+	if dnsName := entry.GetAttributeValue("dNSHostName"); dnsName != "" {
+		return dnsName
+	}
+	name := entry.GetAttributeValue("name")
+	if name == "" {
+		return ""
+	}
+	if strings.Contains(name, ".") || c.domain == "" {
+		return name
+	}
+	return name + "." + c.domain
 }
 
 // GetSubnets retrieves subnet objects from AD Sites and Services.
