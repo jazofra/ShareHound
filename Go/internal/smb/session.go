@@ -135,6 +135,12 @@ func (s *SMBSession) Connect() error {
 		classification := ClassifyError(err)
 		s.log.Debug(fmt.Sprintf("[%s] Authentication failed: %s", classification.Category, classification.Message))
 		conn.Close()
+		s.conn = nil
+		if s.credentials.WindowsAuth && s.activateNativeWindowsFallback("SMB authentication failed") {
+			s.connected = true
+			s.log.Debug(fmt.Sprintf("[+] Using Windows-native SMB access to '%s' with current logon session", s.remoteName))
+			return nil
+		}
 		return ErrAuthFailed
 	}
 
@@ -276,6 +282,9 @@ func (s *SMBSession) ForceClose() error {
 func (s *SMBSession) IsConnected() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.nativeWindows {
+		return s.connected
+	}
 	return s.connected && s.session != nil
 }
 
