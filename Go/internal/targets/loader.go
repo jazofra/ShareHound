@@ -19,6 +19,9 @@ import (
 type Target struct {
 	Type  string // "ipv4", "ipv6", "fqdn"
 	Value string
+	// SID is the objectSid of the AD computer object for this target, when
+	// it could be resolved over LDAP. Empty otherwise.
+	SID string
 }
 
 // Options holds target loading options.
@@ -131,7 +134,82 @@ func LoadTargets(opts *Options, cfg *config.Config, log logger.LoggerInterface) 
 	// Deduplicate final targets
 	finalTargets = uniqueTargets(finalTargets)
 
+	// Resolve computer SIDs so the Computer -> NetworkShareHost edge can be
+	// anchored on the Computer's object ID instead of its (non-unique) name.
+	if opts.AuthDCIP != "" && opts.hasLDAPAuth() {
+		resolveComputerSIDs(finalTargets, opts, log)
+	}
+
 	return finalTargets, nil
+}
+
+// resolveComputerSIDs fills in Target.SID for FQDN targets from AD.
+// Failures are non-fatal: targets without a SID fall back to name matching.
+func resolveComputerSIDs(finalTargets []Target, opts *Options, log logger.LoggerInterface) {
+	hasFQDN := false
+	for _, t := range finalTargets {
+		if t.Type == "fqdn" {
+			hasFQDN = true
+			break
+		}
+	}
+	if !hasFQDN {
+		return
+	}
+
+	client, err := newLDAPClient(opts)
+	if err != nil {
+		log.Warning("Could not resolve computer SIDs, falling back to name matching: " + err.Error())
+		return
+	}
+	defer client.Close()
+
+	sids, ambiguous, err := client.GetComputerSIDs()
+	if err != nil {
+		log.Warning("Could not resolve computer SIDs, falling back to name matching: " + err.Error())
+		return
+	}
+
+	resolved, fqdns := 0, 0
+	for i := range finalTargets {
+		if finalTargets[i].Type != "fqdn" {
+			continue
+		}
+		fqdns++
+		if sid, ok := sids[strings.ToLower(finalTargets[i].Value)]; ok {
+			finalTargets[i].SID = sid
+			resolved++
+		}
+	}
+	log.Info(fmt.Sprintf("Resolved computer SIDs for %d/%d FQDN targets", resolved, fqdns))
+
+	sort.Strings(ambiguous)
+	for _, host := range ambiguous {
+		log.Warning(fmt.Sprintf("Multiple AD computer objects share the hostname %s; using SID %s", host, sids[host]))
+	}
+}
+
+// newLDAPClient creates and connects an LDAP client from the target options.
+func newLDAPClient(opts *Options) (*ldap.Client, error) {
+	client, err := ldap.NewClient(&ldap.ClientOptions{
+		Domain:      opts.AuthDomain,
+		DCIP:        opts.AuthDCIP,
+		Username:    opts.AuthUser,
+		Password:    opts.AuthPassword,
+		Hashes:      opts.AuthHashes,
+		AuthKey:     opts.AuthKey,
+		UseLDAPS:    opts.UseLDAPS,
+		UseKerberos: opts.UseKerberos,
+		WindowsAuth: opts.WindowsAuth,
+		KDCHost:     opts.KDCHost,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LDAP client: %w", err)
+	}
+	if err := client.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
+	}
+	return client, nil
 }
 
 func (opts *Options) hasLDAPAuth() bool {
@@ -146,26 +224,9 @@ func (opts *Options) hasLDAPAuth() bool {
 
 // loadFromActiveDirectory loads computers and servers from AD.
 func loadFromActiveDirectory(opts *Options, log logger.LoggerInterface) ([]string, error) {
-	ldapOpts := &ldap.ClientOptions{
-		Domain:      opts.AuthDomain,
-		DCIP:        opts.AuthDCIP,
-		Username:    opts.AuthUser,
-		Password:    opts.AuthPassword,
-		Hashes:      opts.AuthHashes,
-		AuthKey:     opts.AuthKey,
-		UseLDAPS:    opts.UseLDAPS,
-		UseKerberos: opts.UseKerberos,
-		WindowsAuth: opts.WindowsAuth,
-		KDCHost:     opts.KDCHost,
-	}
-
-	client, err := ldap.NewClient(ldapOpts)
+	client, err := newLDAPClient(opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create LDAP client: %w", err)
-	}
-
-	if err := client.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
+		return nil, err
 	}
 	defer client.Close()
 
@@ -196,26 +257,9 @@ func loadFromActiveDirectory(opts *Options, log logger.LoggerInterface) ([]strin
 
 // loadSubnetsFromAD loads subnet CIDRs from AD Sites and Services.
 func loadSubnetsFromAD(opts *Options, log logger.LoggerInterface) ([]string, error) {
-	ldapOpts := &ldap.ClientOptions{
-		Domain:      opts.AuthDomain,
-		DCIP:        opts.AuthDCIP,
-		Username:    opts.AuthUser,
-		Password:    opts.AuthPassword,
-		Hashes:      opts.AuthHashes,
-		AuthKey:     opts.AuthKey,
-		UseLDAPS:    opts.UseLDAPS,
-		UseKerberos: opts.UseKerberos,
-		WindowsAuth: opts.WindowsAuth,
-		KDCHost:     opts.KDCHost,
-	}
-
-	client, err := ldap.NewClient(ldapOpts)
+	client, err := newLDAPClient(opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create LDAP client: %w", err)
-	}
-
-	if err := client.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
+		return nil, err
 	}
 	defer client.Close()
 

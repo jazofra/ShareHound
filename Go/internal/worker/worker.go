@@ -260,7 +260,7 @@ func ProcessTarget(
 
 			// Process the share
 			counts := processShare(
-				name, info, host, remoteName,
+				name, info, host, remoteName, target.SID,
 				opts, cfg, og, parsedRules,
 				pool, results, resultsLock, log, &timeoutFlag,
 			)
@@ -308,7 +308,7 @@ func ProcessTarget(
 func processShare(
 	shareName string,
 	shareInfo smb.ShareInfo,
-	host, remoteName string,
+	host, remoteName, computerSID string,
 	opts *Options,
 	cfg *config.Config,
 	og *graph.OpenGraph,
@@ -383,7 +383,11 @@ func processShare(
 	hostNode := graph.NewNode("NSHOST:"+strings.ToLower(remoteName), kinds.NodeKindNetworkShareHost).
 		SetProperty("name", remoteName+" (Network Share Host)").
 		SetProperty("fqdn", remoteName)
+	if computerSID != "" {
+		hostNode.SetProperty("computersid", computerSID)
+	}
 	ogc.SetHost(hostNode)
+	ogc.SetHostComputerSID(computerSID)
 
 	// Create share node — use remoteName for UNC path consistency
 	shareID := fmt.Sprintf("\\\\%s\\%s\\", remoteName, shareName)
