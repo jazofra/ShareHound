@@ -6,12 +6,14 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
 	ldapgssapi "github.com/go-ldap/ldap/v3/gssapi"
 	"github.com/specterops/sharehound/internal/auth"
 	"github.com/specterops/sharehound/internal/credentials"
+	"github.com/specterops/sharehound/internal/smb"
 )
 
 // Default page size for LDAP paging (AD default MaxPageSize is 1000)
@@ -219,6 +221,89 @@ func (c *Client) GetServers() ([]string, error) {
 	}
 
 	return servers, nil
+}
+
+// computerCandidate is one AD computer object competing for a hostname.
+type computerCandidate struct {
+	sid        string
+	samMatches bool  // sAMAccountName equals the host's first DNS label + "$"
+	enabled    bool  // ACCOUNTDISABLE bit is not set
+	lastLogon  int64 // lastLogonTimestamp (0 if never)
+}
+
+// betterThan reports whether a is a more likely owner of the hostname than b:
+// matching sAMAccountName first, then enabled accounts, then the most recent
+// logon.
+func (a computerCandidate) betterThan(b computerCandidate) bool {
+	if a.samMatches != b.samMatches {
+		return a.samMatches
+	}
+	if a.enabled != b.enabled {
+		return a.enabled
+	}
+	return a.lastLogon > b.lastLogon
+}
+
+// GetComputerSIDs returns a map of lowercase computer FQDN -> objectSid for
+// every computer object in the domain. The SID is the BloodHound object ID of
+// the Computer node, so it identifies the node unambiguously even when
+// several nodes share a name.
+//
+// When several AD computer objects resolve to the same hostname, the most
+// plausible one is kept (see computerCandidate.betterThan) and the hostname is
+// reported in the second return value.
+func (c *Client) GetComputerSIDs() (map[string]string, []string, error) {
+	searchRequest := ldap.NewSearchRequest(
+		c.baseDN,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		"(&(objectCategory=computer)(objectClass=computer))",
+		[]string{"dNSHostName", "name", "sAMAccountName", "objectSid", "userAccountControl", "lastLogonTimestamp"},
+		nil,
+	)
+
+	sr, err := c.conn.SearchWithPaging(searchRequest, defaultPageSize)
+	if err != nil {
+		return nil, nil, fmt.Errorf("LDAP search failed: %w", err)
+	}
+
+	best := make(map[string]computerCandidate)
+	duplicated := make(map[string]struct{})
+	for _, entry := range sr.Entries {
+		host := strings.ToLower(c.hostnameFromEntry(entry))
+		if host == "" {
+			continue
+		}
+		sid, err := smb.ParseSID(entry.GetRawAttributeValue("objectSid"))
+		if err != nil {
+			continue
+		}
+		uac, _ := strconv.ParseInt(entry.GetAttributeValue("userAccountControl"), 10, 64)
+		lastLogon, _ := strconv.ParseInt(entry.GetAttributeValue("lastLogonTimestamp"), 10, 64)
+		label := strings.SplitN(host, ".", 2)[0]
+		cand := computerCandidate{
+			sid:        sid.String(),
+			samMatches: strings.EqualFold(entry.GetAttributeValue("sAMAccountName"), label+"$"),
+			enabled:    uac&0x2 == 0,
+			lastLogon:  lastLogon,
+		}
+		if cur, ok := best[host]; ok {
+			duplicated[host] = struct{}{}
+			if !cand.betterThan(cur) {
+				continue
+			}
+		}
+		best[host] = cand
+	}
+
+	sids := make(map[string]string, len(best))
+	for host, cand := range best {
+		sids[host] = cand.sid
+	}
+	ambiguous := make([]string, 0, len(duplicated))
+	for host := range duplicated {
+		ambiguous = append(ambiguous, host)
+	}
+	return sids, ambiguous, nil
 }
 
 // hostnameFromEntry returns dNSHostName if set, otherwise falls back to the

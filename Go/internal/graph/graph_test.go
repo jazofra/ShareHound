@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/specterops/sharehound/pkg/kinds"
 )
 
 func TestNodeMarshalJSON(t *testing.T) {
@@ -412,5 +414,36 @@ func TestExportToFileZip(t *testing.T) {
 
 	if zipStat.Size() >= jsonStat.Size() {
 		t.Log("Warning: ZIP file is not smaller than JSON (may be expected for small files)")
+	}
+}
+
+func hostsEdgeStart(t *testing.T, sid string) EdgeEndpoint {
+	t.Helper()
+	og, err := NewOpenGraph("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := NewOpenGraphContext(og, nil)
+	ctx.SetHost(NewNode("NSHOST:srv.corp.local", kinds.NodeKindNetworkShareHost).SetProperty("fqdn", "srv.corp.local"))
+	ctx.SetHostComputerSID(sid)
+	ctx.SetShare(NewNode(`\\srv.corp.local\data\`, kinds.NodeKindNetworkShareSMB))
+	ctx.AddPathToGraph()
+	_, edges := og.GetNodesAndEdges()
+	for _, e := range edges {
+		if e.Kind == kinds.EdgeKindHostsNetworkShare {
+			return e.Start
+		}
+	}
+	t.Fatal("HostsNetworkShare edge not found")
+	return EdgeEndpoint{}
+}
+
+func TestHostsNetworkShareEdgeMatchesComputerBySID(t *testing.T) {
+	sid := "S-1-5-21-1-2-3-1104"
+	if got := hostsEdgeStart(t, sid); got.Value != sid || got.MatchBy != "id" || got.Kind != "Computer" {
+		t.Errorf("unexpected start endpoint with SID: %+v", got)
+	}
+	if got := hostsEdgeStart(t, ""); got.Value != "SRV.CORP.LOCAL" || got.MatchBy != "name" || got.Kind != "Computer" {
+		t.Errorf("unexpected start endpoint without SID: %+v", got)
 	}
 }

@@ -23,6 +23,7 @@ type PathEntry struct {
 type OpenGraphContext struct {
 	graph               *OpenGraph
 	host                *Node
+	hostComputerSID     string // objectSid of the AD Computer behind the host; empty if unknown
 	share               *Node
 	shareRights         ShareRights
 	shareRootNTFSRights ShareRights // NTFS rights for the share root directory; used as fallback for first-level files
@@ -57,6 +58,14 @@ func (c *OpenGraphContext) SetHost(host *Node) {
 // GetHost returns the host node.
 func (c *OpenGraphContext) GetHost() *Node {
 	return c.host
+}
+
+// SetHostComputerSID sets the objectSid of the AD Computer that serves the
+// host. When set, the HostsNetworkShare edge matches the Computer node by
+// object ID (unique) instead of by name (which can be shared by several
+// Computer nodes, in which case BloodHound does not create the edge).
+func (c *OpenGraphContext) SetHostComputerSID(sid string) {
+	c.hostComputerSID = strings.ToUpper(sid)
 }
 
 // SetDomainSuffix sets the domain FQDN used to prefix well-known SIDs
@@ -207,11 +216,19 @@ func (c *OpenGraphContext) AddPathToGraph() {
 		c.graph.AddNodeWithoutValidation(c.host)
 
 		// Add HostsNetworkShare edge from BloodHound Computer to NetworkShareHost.
-		// Use the "fqdn" property (plain FQDN) for the Computer lookup so it does
-		// not collide with the NetworkShareHost node ID (which carries a prefix).
-		hostName := c.host.GetStringProperty("fqdn")
-		hostEdge := NewEdge(strings.ToUpper(hostName), c.host.ID, kinds.EdgeKindHostsNetworkShare)
-		hostEdge.SetStartMatchBy("name")
+		// Prefer the Computer's SID, which is its BloodHound object ID and is
+		// therefore unique. Without a SID, fall back to matching the Computer's
+		// name against the "fqdn" property (plain FQDN, so it does not collide
+		// with the prefixed NetworkShareHost node ID).
+		var hostEdge *Edge
+		if c.hostComputerSID != "" {
+			hostEdge = NewEdge(c.hostComputerSID, c.host.ID, kinds.EdgeKindHostsNetworkShare)
+			hostEdge.SetStartMatchBy("id")
+		} else {
+			hostName := c.host.GetStringProperty("fqdn")
+			hostEdge = NewEdge(strings.ToUpper(hostName), c.host.ID, kinds.EdgeKindHostsNetworkShare)
+			hostEdge.SetStartMatchBy("name")
+		}
 		hostEdge.SetStartKind("Computer")
 		hostEdge.SetEndMatchBy("id")
 		hostEdge.SetEndKind(kinds.NodeKindNetworkShareHost)
