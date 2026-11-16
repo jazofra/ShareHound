@@ -374,7 +374,7 @@ To output uncompressed JSON, use a `.json` extension:
 | `HasNetworkShare` | Host to Share relationship |
 | `Contains` | Parent to Child (directory to file/subdirectory) |
 
-The `HostsNetworkShare` edge is anchored on the Computer's SID (its BloodHound object ID) whenever the SID can be resolved over LDAP (`--dc-ip` plus credentials, FQDN targets in the authentication domain). This keeps the edge unambiguous when several Computer nodes share the same name. If no SID is available, the edge falls back to matching the Computer by name.
+The `HostsNetworkShare` edge is anchored on the Computer's SID (its BloodHound object ID) whenever the SID can be resolved over LDAP (`--auth-dc-ip` plus credentials, FQDN targets in the authentication domain). This keeps the edge unambiguous when several Computer nodes share the same name. If no SID is available, the edge falls back to matching the Computer by name.
 
 #### Share-Level Permission Edges (20)
 
